@@ -1,0 +1,35 @@
+# STOPgap configuration. Copy to config.toml (git-ignored) and edit.
+# Every value can also be set in .env or as an environment variable STOPGAP_<NAME>.
+# Paths may be absolute or relative to the project folder.
+
+# Folder with the encrypted *.coot files (searched recursively). Can also be chosen in the app.
+source_dir = ""
+
+# Where recovered photos are written; the folder structure of source_dir is mirrored.
+output_dir = ""
+
+# Folders with healthy (NOT encrypted) JPEG photos, ideally from the same cameras/phones.
+# STOPgap learns each camera's JPEG settings from them. Empty = use source_dir.
+donor_dirs = []
+
+# Folders searched for untouched copies of encrypted files (backups, phone transfers, ...).
+# Only these folders are ever searched. Empty = use source_dir.
+copy_search_dirs = []
+
+# Machine-specific working data (camera library, copy list) and temp files. Keep them on a
+# healthy disk; both are git-ignored.
+data_dir = "local"
+temp_dir = "local/tmp"
+
+# Parallel workers (each needs ~200 MB RAM) and the app's upper limit.
+workers = 4
+max_workers = 6
+
+# New photos wait while free RAM is below this, so the OS never has to page to disk.
+min_free_ram_gb = 3.0
+
+# Run workers at idle CPU / very-low disk / low memory priority.
+low_priority = true
+
+# Folder names (case-insensitive substrings) never searched for encrypted files.
+skip_dirs = ["$recycle.bin", "system volume information"]

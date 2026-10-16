@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stopgap"
+version = "0.3.3"
+description = "Recover photos from STOP/Djvu ransomware - no ransom, no key."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = ["numpy>=1.26", "Pillow>=10.1"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Security",
+  "License :: Other/Proprietary License",
+]
+
+[project.scripts]
+stopgap = "stopgap.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

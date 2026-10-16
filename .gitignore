@@ -1,0 +1,35 @@
+# --- Personal / machine-specific data: NEVER commit -------------------------
+# Camera library and copy lists contain paths to your own photos.
+local/
+config.toml
+.env
+progress.json
+report.csv
+*.coot
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.png
+*.npz
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# --- OS / editors ------------------------------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# --- Leftover from before the repo existed ----------------------------------
+photo-repair/
