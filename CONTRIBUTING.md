@@ -39,7 +39,8 @@ to companies for commercial use (see COMMERCIAL.md). So that both stay possible:
 > irrevocable licence to use, modify, sublicense and distribute your contribution under the
 > project's non-commercial licence **and under commercial licences**. You keep your copyright.
 
-Add this line to your PR description to confirm:
+Outside contributors: add this line to your PR description to confirm (the maintainer owns
+their own code and doesn't add it):
 `I agree to the Licence of contributions in CONTRIBUTING.md.`
 
 ## Good first contributions
