@@ -116,7 +116,8 @@ class ConfigTests(unittest.TestCase):
         try:
             s = config.load(config_path=os.path.join(TMP_BASE, "does-not-exist.toml"))
             self.assertEqual(s.workers, 2)
-            self.assertEqual(s.donor_dirs, ["a", "b"])
+            # relative paths resolve against the project folder
+            self.assertEqual(s.donor_dirs, [os.path.join(config.PROJECT_ROOT, "a"), os.path.join(config.PROJECT_ROOT, "b")])
         finally:
             del os.environ["STOPGAP_WORKERS"], os.environ["STOPGAP_DONOR_DIRS"]
 
