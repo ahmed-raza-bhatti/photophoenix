@@ -6,6 +6,10 @@ app redoes photos recovered by an older engine.
 
 ## [Unreleased]
 ### Added
+- Grey-area choice: keep it, crop it off, or save both. Cropping is lossless (the new file starts
+  at the first complete block row; picture data is copied, not re-compressed). `report.csv`
+  marks cropped photos; changing the choice redoes affected photos. `recover --grey`.
+- README section explaining the grey area: why its size varies and why some photos have none.
 - "Learn cameras from…" window: add healthy-photo folders or the whole PC to the camera library
   at any time; learning adds to the existing library, can be stopped, keeps what it learned.
 - Honest explanation and result summary for "Find untouched copies".

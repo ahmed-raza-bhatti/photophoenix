@@ -117,11 +117,12 @@ def stuff(b):
     return b.replace(b"\xff", b"\xff\x00")
 
 
-def decode(buf, layout, ncomp, start_bit=0, stats=True, max_bits=None):
+def decode(buf, layout, ncomp, start_bit=0, stats=True, max_bits=None, stop_mcu=None):
     """Decode destuffed entropy data from start_bit.
 
     Returns (mcus, status, bit_position, dcs, flats) where status is 'eof' (ran cleanly
-    to the end), 'limit' (reached max_bits cleanly) or 'error'.
+    to the end), 'limit' (reached max_bits cleanly), 'stop' (reached MCU number stop_mcu;
+    bit_position is where it starts) or 'error'.
     """
     total_bits = len(buf) * 8
     limit = total_bits if max_bits is None else min(total_bits, start_bit + max_bits)
@@ -136,6 +137,8 @@ def decode(buf, layout, ncomp, start_bit=0, stats=True, max_bits=None):
     M = MASK
     try:
         while True:
+            if mcus == stop_mcu:  # caller wants the bit position where this MCU starts
+                return mcus, "stop", pos * 8 - nb, (dcs, flats)
             for dl, dsl, al, asl, ci in layout:
                 if nb < 27:
                     acc = ((acc & M[nb]) << 24) | (data[pos] << 16) | (data[pos + 1] << 8) | data[pos + 2]
@@ -182,6 +185,52 @@ def decode(buf, layout, ncomp, start_bit=0, stats=True, max_bits=None):
         if used >= total_bits - 24:
             return mcus, "eof", used, _trim(dcs, flats, layout, mcus)
         return mcus, "error", used, (dcs, flats)
+
+
+def dc_spans(buf, layout, bit):
+    """Decode the single MCU starting at `bit`; return [(start, end, component, diff)] for the
+    DC code of each component's first block, so it can be re-encoded in place."""
+    def read(n):
+        nonlocal bit
+        v = 0
+        for _ in range(n):
+            v = (v << 1) | ((buf[bit >> 3] >> (7 - (bit & 7))) & 1); bit += 1
+        return v
+
+    def sym(fast, slow):
+        nonlocal bit
+        for ln in range(1, 17):
+            code = 0
+            b = bit
+            for _ in range(ln):
+                code = (code << 1) | ((buf[b >> 3] >> (7 - (b & 7))) & 1); b += 1
+            if ln <= FAST:
+                v = fast[code << (FAST - ln)]
+                if v and (v >> 8) == ln:
+                    bit = b; return v & 0xFF
+            else:
+                v = slow.get((ln << 16) | code)
+                if v:
+                    bit = b; return v & 0xFF
+        raise LookupError("bad Huffman code")
+
+    out, seen = [], set()
+    for dl, dsl, al, asl, ci in layout:
+        b0 = bit
+        s = sym(dl, dsl)
+        diff = 0
+        if s:
+            x = read(s); diff = x if x >= (1 << (s - 1)) else x - (1 << s) + 1
+        if ci not in seen:
+            seen.add(ci); out.append((b0, bit, ci, diff))
+        k = 1
+        while k < 64:
+            rs = sym(al, asl); s = rs & 15
+            if s == 0:
+                if rs == 0xF0: k += 16; continue
+                break
+            k += (rs >> 4) + 1; read(s)
+    return out
 
 
 def _trim(dcs, flats, layout, mcus):

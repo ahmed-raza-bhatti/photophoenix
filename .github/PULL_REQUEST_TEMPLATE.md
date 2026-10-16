@@ -12,4 +12,5 @@
 - [ ] `python -m unittest discover -s tests` passes
 - [ ] `CHANGELOG.md` updated; `ENGINE_VERSION` bumped if recovery results change
 - [ ] No real photos, encrypted files, personal paths, `local/`, `config.toml` or `.env`
-- [ ] I agree to the Licence of contributions in CONTRIBUTING.md.
+- [ ] Outside contributors only: I agree to the Licence of contributions in CONTRIBUTING.md.
+      (Maintainers: delete this line.)
