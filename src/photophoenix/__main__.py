@@ -1,9 +1,9 @@
 """Command line.
 
-  python -m stopgap                         open the desktop app
-  python -m stopgap recover FILE.coot [-o OUT.jpg]
-  python -m stopgap build-library [DIR ...] learn camera settings from healthy JPEGs
-  python -m stopgap find-copies             look for untouched copies of encrypted files
+  python -m photophoenix                         open the desktop app
+  python -m photophoenix recover FILE.coot [-o OUT.jpg]
+  python -m photophoenix build-library [DIR ...] learn camera settings from healthy JPEGs
+  python -m photophoenix find-copies             look for untouched copies of encrypted files
 """
 import argparse, json, multiprocessing, os, sys
 
@@ -11,8 +11,8 @@ from . import __version__, config, copies, engine, safety
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="stopgap", description="Recover photos from STOP/Djvu ransomware.")
-    ap.add_argument("--version", action="version", version=f"STOPgap {__version__} (engine {engine.ENGINE_VERSION})")
+    ap = argparse.ArgumentParser(prog="photophoenix", description="Recover photos from STOP/Djvu ransomware.")
+    ap.add_argument("--version", action="version", version=f"PhotoPhoenix {__version__} (engine {engine.ENGINE_VERSION})")
     ap.add_argument("--config", help="path to config.toml")
     sub = ap.add_subparsers(dest="cmd")
     r = sub.add_parser("recover", help="recover one encrypted photo")
@@ -41,11 +41,11 @@ def main(argv=None):
         print(f"{len(entries)} camera/size types -> {s.library_path}")
     elif a.cmd == "find-copies":
         if not s.source_dir:
-            sys.exit("Set source_dir (the folder with *.coot files) in config.toml or STOPGAP_SOURCE_DIR.")
+            sys.exit("Set source_dir (the folder with *.coot files) in config.toml or PHOTOPHOENIX_SOURCE_DIR.")
         copies.find(s.source_dir, s.copy_roots(), s.copies_path, skip=[d.lower() for d in s.skip_dirs])
     elif a.cmd == "recover":
         if not os.path.exists(s.library_path):
-            sys.exit(f"No camera library yet: run 'python -m stopgap build-library DIR' first ({s.library_path}).")
+            sys.exit(f"No camera library yet: run 'python -m photophoenix build-library DIR' first ({s.library_path}).")
         with open(s.library_path, encoding="utf-8") as fh:
             lib = engine.Library(json.load(fh))
         twin = copies.load(s.copies_path, s.copy_roots()).get(os.path.normcase(os.path.abspath(a.file)))

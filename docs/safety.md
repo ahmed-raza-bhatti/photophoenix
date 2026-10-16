@@ -3,7 +3,7 @@
 Recovery reads gigabytes and runs for hours, often on old machines with tired disks. An early
 version froze a PC with a failing system SSD: a diagnostic kept 2 MB lookup tables for
 thousands of camera table sets in every worker, ran out of RAM, and the OS paged heavily to
-the failing disk. STOPgap now:
+the failing disk. PhotoPhoenix now:
 
 - **Small, bounded lookup tables:** 9-bit first-level Huffman tables (~4 KB instead of ~2 MB)
   in an LRU cache capped at 256 entries. Touching all ~9,000 table sets adds ~1 MB.

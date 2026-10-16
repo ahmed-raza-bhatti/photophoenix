@@ -13,7 +13,7 @@
 
 No network access, no external services, no accounts, no GPU.
 
-## Components (`src/stopgap/`)
+## Components (`src/photophoenix/`)
 
 | Module | Role |
 |---|---|
@@ -21,7 +21,7 @@ No network access, no external services, no accounts, no GPU.
 | `engine.py` | Recovery: file split, donor library, the five recovery paths, stream rebuilding, quality scoring, quant-table and chroma-step selection. |
 | `colour.py` | Estimates the unknown brightness/colour offset of a scan decoded mid-stream. |
 | `copies.py` | Finds and byte-verifies untouched copies of encrypted files. |
-| `config.py` | Settings: defaults < `config.toml` < `.env` < `STOPGAP_*` environment. |
+| `config.py` | Settings: defaults < `config.toml` < `.env` < `PHOTOPHOENIX_*` environment. |
 | `safety.py` | Process priorities, free-RAM check, temp folder. |
 | `worker.py` | Per-process worker: loads library + copy list, recovers one file, writes output. |
 | `app.py` | Tkinter app: folder choice, progress, Pause/Resume/Stop, resume via `progress.json`. |

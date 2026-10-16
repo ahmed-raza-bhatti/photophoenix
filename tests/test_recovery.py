@@ -17,7 +17,7 @@ def _write(path, data):
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-from stopgap import config, copies, engine  # noqa: E402
+from photophoenix import config, copies, engine  # noqa: E402
 
 TMP_BASE = os.path.join(ROOT, "local", "tmp")  # keep test files off the system temp disk
 
@@ -112,20 +112,21 @@ class RecoveryTests(unittest.TestCase):
 
 class ConfigTests(unittest.TestCase):
     def test_environment_overrides(self):
-        os.environ["STOPGAP_WORKERS"] = "2"; os.environ["STOPGAP_DONOR_DIRS"] = "a;b"
+        os.environ["PHOTOPHOENIX_WORKERS"] = "2"; os.environ["PHOTOPHOENIX_DONOR_DIRS"] = "a;b"
         try:
             s = config.load(config_path=os.path.join(TMP_BASE, "does-not-exist.toml"))
             self.assertEqual(s.workers, 2)
-            self.assertEqual(s.donor_dirs, ["a", "b"])
+            # relative paths resolve against the project folder
+            self.assertEqual(s.donor_dirs, [os.path.join(config.PROJECT_ROOT, "a"), os.path.join(config.PROJECT_ROOT, "b")])
         finally:
-            del os.environ["STOPGAP_WORKERS"], os.environ["STOPGAP_DONOR_DIRS"]
+            del os.environ["PHOTOPHOENIX_WORKERS"], os.environ["PHOTOPHOENIX_DONOR_DIRS"]
 
     def test_workers_are_capped(self):
-        os.environ["STOPGAP_WORKERS"] = "99"
+        os.environ["PHOTOPHOENIX_WORKERS"] = "99"
         try:
             self.assertLessEqual(config.load().workers, config.Settings().max_workers)
         finally:
-            del os.environ["STOPGAP_WORKERS"]
+            del os.environ["PHOTOPHOENIX_WORKERS"]
 
 
 if __name__ == "__main__":

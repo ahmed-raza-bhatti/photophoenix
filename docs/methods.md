@@ -1,6 +1,6 @@
 # Recovery methods
 
-The techniques that make STOPgap work, in the order the engine tries them. Each one was
+The techniques that make PhotoPhoenix work, in the order the engine tries them. Each one was
 added to fix a concrete failure seen on real photos; the evidence is in
 [validation.md](validation.md). Keep these when changing the code.
 

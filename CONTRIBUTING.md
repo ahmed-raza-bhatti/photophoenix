@@ -1,4 +1,4 @@
-# Contributing to STOPgap
+# Contributing to PhotoPhoenix
 
 Thank you for helping ransomware victims get their photos back.
 
@@ -10,7 +10,7 @@ Thank you for helping ransomware victims get their photos back.
 - Keep pull requests small and focused; one topic per PR.
 - Commit messages: imperative summary line ("Detect chroma step per camera"), body says *why*.
 - Update `CHANGELOG.md`. If a change alters recovery results, bump `ENGINE_VERSION` in
-  `src/stopgap/engine.py` (the app then redoes older results).
+  `src/photophoenix/engine.py` (the app then redoes older results).
 
 ## Before opening a PR
 
@@ -31,7 +31,7 @@ python -m unittest discover -s tests -v
 
 ## Licence of contributions
 
-STOPgap is free for non-commercial use (PolyForm Noncommercial 1.0.0) and separately licensed
+PhotoPhoenix is free for non-commercial use (PolyForm Noncommercial 1.0.0) and separately licensed
 to companies for commercial use (see COMMERCIAL.md). So that both stay possible:
 
 > By submitting a contribution you confirm that you wrote it (or have the right to submit it),

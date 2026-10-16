@@ -1,8 +1,8 @@
-"""STOPgap desktop app — progress bar, Pause/Resume, Stop, gentle on the computer.
+"""PhotoPhoenix desktop app — progress bar, Pause/Resume, Stop, gentle on the computer.
 
 Progress is saved to progress.json in the output folder; Start again with the same
 folders to resume. Workers run at background priority and wait when RAM is low.
-All defaults come from config (config.toml / .env / STOPGAP_* environment variables).
+All defaults come from config (config.toml / .env / PHOTOPHOENIX_* environment variables).
 """
 import csv, dataclasses, json, os, queue, threading, time
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
@@ -11,7 +11,7 @@ from tkinter import ttk, filedialog, messagebox
 
 from . import __version__, config, copies, engine, safety
 
-TITLE = "STOPgap"
+TITLE = "PhotoPhoenix"
 SAVE_EVERY = 25  # results between progress.json saves (keeps disk writes low)
 ICONS = {"ok": "✔", "review": "?", "failed": "✘"}
 

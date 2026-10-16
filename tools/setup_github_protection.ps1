@@ -1,7 +1,7 @@
 # Protect `main` on GitHub: pull requests only, 1 approving review, passing tests,
 # no force pushes or deletion, and auto-merge disabled for the repository.
 # Usage (after the repo exists on GitHub and `gh auth login` is done):
-#   powershell -File tools\setup_github_protection.ps1 -Repo OWNER/stopgap
+#   powershell -File tools\setup_github_protection.ps1 -Repo OWNER/photophoenix
 param([Parameter(Mandatory = $true)][string]$Repo)
 
 gh repo edit $Repo --enable-auto-merge=false --delete-branch-on-merge
