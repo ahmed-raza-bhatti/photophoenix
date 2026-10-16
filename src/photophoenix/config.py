@@ -12,7 +12,8 @@ import os
 import tomllib
 from dataclasses import dataclass, field, fields
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+GREY_MODES = ("keep", "crop", "both")
+PROJECT_ROOT =os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @dataclass
@@ -36,6 +37,9 @@ class Settings:
     min_free_ram_gb: float = 3.0
     # Run workers at idle CPU / very-low disk / low memory priority.
     low_priority: bool = True
+    # The encrypted top of a photo is shown grey. "keep" (shows what's missing), "crop" (remove
+    # the grey rows; lossless) or "both" (save the full photo and a "(cropped)" copy).
+    grey_area: str = "keep"
     # Folder names (case-insensitive substrings) never searched for encrypted files.
     skip_dirs: list = field(default_factory=lambda: ["$recycle.bin", "system volume information"])
 
@@ -98,6 +102,8 @@ def load(config_path=None):
         if name in defaults:
             setattr(s, name, _coerce(name, v, defaults[name]))
     s.workers = max(1, min(s.workers, s.max_workers))
+    if s.grey_area not in GREY_MODES:
+        s.grey_area = "keep"
     # relative paths are relative to the project folder, not to wherever the app was started
     rel = lambda p: p if not p or os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)
     s.source_dir, s.output_dir = rel(s.source_dir), rel(s.output_dir)

@@ -12,6 +12,21 @@ from tkinter import ttk, filedialog, messagebox
 from . import __version__, config, copies, engine, safety
 
 TITLE = "PhotoPhoenix"
+GREY_EXPLAINER = """The grey area is the top part of a photo that was inside the encrypted 150 KB.
+That part of the picture can't be recovered: it is scrambled with a key only the
+attackers have.
+
+Keep it: the photo keeps its original size and the grey band shows honestly what is
+missing.
+
+Crop it off: the grey rows are removed. The photo is shorter than the original; the
+picture itself is not re-compressed, so its quality is unchanged. report.csv marks
+these photos as "cropped".
+
+Save both: the full photo plus a copy named "... (cropped).jpg".
+
+Photos restored from an untouched copy, or rebuilt from their own header, have no grey
+area and are never cropped. Changing this choice later redoes the affected photos."""
 COPIES_EXPLAINER = """Look for exact, unencrypted copies of your encrypted photos?
 
 A copy gives a photo back complete. Most people find few or none, so don't count on it.
@@ -68,6 +83,14 @@ class App:
         self.copies_btn = ttk.Button(bar, text="Find untouched copies", command=self.find_copies)
         self.copies_btn.pack(side="right", padx=(0, 6))
 
+        grey = ttk.Frame(root); grey.pack(fill="x", padx=8)
+        ttk.Label(grey, text="Grey area (the encrypted top of each photo):").pack(side="left")
+        self.grey = tk.StringVar(value=settings.grey_area)
+        for value, text in (("keep", "Keep it (shows what's missing)"), ("crop", "Crop it off"),
+                            ("both", "Save both")):
+            ttk.Radiobutton(grey, text=text, value=value, variable=self.grey).pack(side="left", padx=(8, 0))
+        ttk.Button(grey, text="?", width=2, command=self.explain_grey).pack(side="left", padx=(8, 0))
+
         self.progress = ttk.Progressbar(root, mode="determinate"); self.progress.pack(fill="x", **pad)
         self.status = tk.StringVar(value="Ready. Press Start.")
         ttk.Label(root, textvariable=self.status).pack(anchor="w", **pad)
@@ -95,6 +118,9 @@ class App:
     def settings_for_run(self, src):
         s = dataclasses.replace(self.cfg, source_dir=src)
         return s
+
+    def explain_grey(self):
+        messagebox.showinfo(TITLE, GREY_EXPLAINER)
 
     def learn_cameras(self):
         from .learn_window import LearnWindow
@@ -149,7 +175,7 @@ class App:
         self.running = True; self.paused.clear(); self.stopping.clear()
         self.start_btn.config(state="disabled"); self.pause_btn.config(state="normal", text="Pause")
         self.stop_btn.config(state="normal")
-        threading.Thread(target=self.run, args=(src, out, int(self.workers.get())), daemon=True).start()
+        threading.Thread(target=self.run, args=(src, out, int(self.workers.get()), self.grey.get()), daemon=True).start()
 
     def toggle_pause(self):
         if self.paused.is_set(): self.paused.clear(); self.pause_btn.config(text="Pause")
@@ -168,7 +194,7 @@ class App:
         self.root.after(400, self.root.destroy)
 
     # ---------- background run ----------
-    def run(self, src, out, workers):
+    def run(self, src, out, workers, grey="keep"):
         ev = self.events.put
         s = self.settings_for_run(src)
         os.makedirs(out, exist_ok=True)
@@ -194,8 +220,12 @@ class App:
             files += [os.path.join(dp, f) for f in fs if f.lower().endswith((".jpg.coot", ".jpeg.coot"))]
         files.sort()
 
-        def outdated(r):  # repaired by an older engine with a method that has since improved
-            return r.get("ver") != engine.ENGINE_VERSION and r.get("method") in engine.REDO_METHODS
+        def outdated(r):
+            # repaired by an older engine with a method that has since improved, or with a
+            # different grey-area choice (only photos that have a grey area are redone)
+            if r.get("method") not in engine.REDO_METHODS:
+                return False
+            return r.get("ver") != engine.ENGINE_VERSION or (r.get("status") != "failed" and r.get("grey", "keep") != grey)
 
         todo = [f for f in files if os.path.relpath(f, src) not in state or outdated(state[os.path.relpath(f, src)])]
         redo = sum(1 for f in files if os.path.relpath(f, src) in state and outdated(state[os.path.relpath(f, src)]))
@@ -219,8 +249,8 @@ class App:
                     f = next(it, None)
                     if f is None:
                         exhausted = True; break
-                    prev = state.get(os.path.relpath(f, src), {}).get("output")
-                    pending.add(ex.submit(_work, f, src, out, prev))
+                    prev = state.get(os.path.relpath(f, src))
+                    pending.add(ex.submit(_work, f, src, out, prev, grey))
                 if not pending:
                     if self.stopping.is_set() or exhausted: break
                     if self.paused.is_set():
@@ -239,11 +269,13 @@ class App:
         save()
         with open(os.path.join(out, "report.csv"), "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
-            w.writerow(["file", "status", "method", "percent_recovered", "quality", "size", "detail_or_output"])
+            w.writerow(["file", "status", "method", "percent_recovered", "quality", "size", "grey_area",
+                        "detail_or_output", "cropped_copy"])
             for k in sorted(state):
                 r = state[k]
                 w.writerow([k, r["status"], r.get("method", ""), r.get("percent", ""), r.get("quality", ""),
-                            r.get("dims", ""), r.get("output", r.get("detail", ""))])
+                            r.get("dims", ""), r.get("grey_note", ""), r.get("output", r.get("detail", "")),
+                            r.get("cropped_output") or ""])
         finished_all = len(state) >= len(files)
         ev(("done", "Finished." if finished_all else "Stopped — press Start to resume."))
 
@@ -327,8 +359,8 @@ def _init_worker(settings_dict):
     from . import worker; worker.init(settings_dict)
 
 
-def _work(path, src, out, prev_output=None):
-    from . import worker; return worker.work(path, src, out, prev_output)
+def _work(path, src, out, prev=None, grey="keep"):
+    from . import worker; return worker.work(path, src, out, prev, grey)
 
 
 def main():

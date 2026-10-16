@@ -51,6 +51,34 @@ Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m
 - **A computer with Python 3.11+.** No GPU, no accounts, no API keys, no paid services.
   About 200 MB of RAM per worker; 4 workers by default.
 
+## The grey area: why some photos have one and others don't
+
+The grey band at the top is the part of the picture that was inside the encrypted 150 KB. It
+can't be recovered: it is scrambled with a key only the attackers have. Only an untouched copy
+(or the key leaking one day) can bring it back.
+
+**How big it is depends on the file size**, because the encrypted part is always 150 KB:
+
+| Photo file size | Share of the picture lost | What you see |
+|---|---|---|
+| ~3–4 MB (recent phones) | ~3–6% | a thin strip, easy to miss |
+| ~1–1.5 MB (phones around 2014–2016) | ~10–20% | a clear band |
+| ~300–500 KB (old phones) | ~30–75% | most of the top half |
+| under ~150 KB | 100% | nothing to recover (reported as failed) |
+
+Part of the 150 KB is camera metadata, so photos with a lot of it lose even less.
+
+**No grey area at all** when the photo was restored from an untouched copy, or rebuilt from
+its own header (both complete). Also, when PhotoPhoenix can't tell a camera's full image
+height, it saves only the rows that survived: such a photo has no grey band but is **shorter
+than the original** — its top is missing.
+
+**Your choice in the app** (*Grey area*): **Keep it** (default — original size, the band shows
+honestly what is missing), **Crop it off** (grey rows removed; the photo is shorter), or **Save
+both** (the full photo plus `… (cropped).jpg`). Cropping is lossless: the picture data is copied,
+not re-compressed. `report.csv` marks cropped photos. Changing the choice later redoes the
+affected photos. Setting: `grey_area` in `config.toml`; command line: `recover --grey crop`.
+
 ## Teaching PhotoPhoenix your cameras
 
 A JPEG starts with a header: the "instructions" for reading the picture (size, compression
@@ -151,7 +179,8 @@ stay on your computer and are excluded from git.
 
 ## Known limitations
 
-- The encrypted top part of each photo is gone; it is shown as a grey band.
+- The encrypted top part of each photo is gone; it is shown as a grey band or cropped off
+  (see [The grey area](#the-grey-area-why-some-photos-have-one-and-others-dont)).
 - Colours are estimated when the camera didn't use restart markers; usually close, sometimes off.
 - Only baseline JPEG photos are handled (no PNG, video, documents, progressive JPEG yet).
 - Photos re-saved by editing apps with custom ("optimised") Huffman tables can't be matched.

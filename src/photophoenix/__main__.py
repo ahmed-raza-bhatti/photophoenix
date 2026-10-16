@@ -17,6 +17,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd")
     r = sub.add_parser("recover", help="recover one encrypted photo")
     r.add_argument("file"); r.add_argument("-o", "--output")
+    r.add_argument("--grey", choices=config.GREY_MODES, help="keep the grey (lost) area, crop it off, or save both")
     b = sub.add_parser("build-library", help="learn camera settings from healthy JPEGs")
     b.add_argument("dirs", nargs="*", help="folders or drives of healthy photos (default: donor_dirs / source_dir)")
     b.add_argument("--replace", action="store_true", help="start a new library instead of adding to the existing one")
@@ -61,16 +62,23 @@ def main(argv=None):
         with open(s.library_path, encoding="utf-8") as fh:
             lib = engine.Library(json.load(fh))
         twin = copies.load(s.copies_path, s.copy_roots()).get(os.path.normcase(os.path.abspath(a.file)))
-        res = engine.recover(a.file, lib, twin)
+        grey = a.grey or s.grey_area
+        res = engine.recover(a.file, lib, twin, crop=grey in ("crop", "both"))
         out = a.output or a.file[:-len(".coot")] if a.file.lower().endswith(".coot") else a.output
         out = out or a.file + ".recovered.jpg"
         if os.path.exists(out) and not a.output:
             out = os.path.splitext(out)[0] + ".recovered.jpg"
+        crop = res.get("jpg_cropped")
         if res["method"] == "copy":
             import shutil; shutil.copyfile(twin, out)
         else:
-            with open(out, "wb") as fh: fh.write(res["jpg"])
-        print(f"{res['status']}: {res['method']} {res.get('dims', '')} ~{res['frac']:.0%} of the image -> {out}")
+            with open(out, "wb") as fh: fh.write(crop if grey == "crop" and crop else res["jpg"])
+        print(f"{res['status']}: {res['method']} {res.get('dims', '')} ~{res['frac']:.0%} of the image -> {out}"
+              + (" (grey area cropped off)" if grey == "crop" and crop else ""))
+        if grey == "both" and crop:
+            from .worker import cropped_name
+            with open(cropped_name(out), "wb") as fh: fh.write(crop)
+            print(f"cropped copy -> {cropped_name(out)}")
 
 
 if __name__ == "__main__":

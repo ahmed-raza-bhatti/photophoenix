@@ -91,6 +91,28 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(r["method"], "restart")
         self.assertLess(mean_abs_diff_bottom(original, r["jpg"]), 1.0)  # exact apart from rounding
 
+    def _assert_lossless_crop(self, r):
+        full = np.asarray(Image.open(io.BytesIO(r["jpg"])).convert("RGB"), np.int16)
+        self.assertIsNotNone(r.get("jpg_cropped"))
+        crop = np.asarray(Image.open(io.BytesIO(r["jpg_cropped"])).convert("RGB"), np.int16)
+        self.assertLess(crop.shape[0], full.shape[0])            # grey rows removed
+        self.assertEqual(crop.shape[1], full.shape[1])
+        cut = full.shape[0] - crop.shape[0]
+        # identical to the bottom of the full photo (row 0 may differ: colour smoothing at the edge)
+        self.assertEqual(int(np.abs(full[cut + 1:] - crop[1:]).max()), 0)
+        self.assertLess(float(crop[:8].std()), 5 + float(full[cut:cut + 8].std()) * 2)  # no grey band left
+
+    def test_crop_align_is_lossless(self):
+        lib = self._library(jpeg_bytes(synthetic_photo(2)))
+        r = engine.recover(self._encrypt_to_file(jpeg_bytes(synthetic_photo(1))), lib, crop=True)
+        self._assert_lossless_crop(r)
+
+    def test_crop_restart_is_lossless(self):
+        lib = self._library(jpeg_bytes(synthetic_photo(4), restart_marker_blocks=50))
+        r = engine.recover(self._encrypt_to_file(jpeg_bytes(synthetic_photo(3), restart_marker_blocks=50)), lib, crop=True)
+        self.assertEqual(r["method"], "restart")
+        self._assert_lossless_crop(r)
+
     def test_whole_file_inside_encrypted_area_is_reported(self):
         small = jpeg_bytes(synthetic_photo(5, 320, 240))
         lib = self._library(jpeg_bytes(synthetic_photo(6)))

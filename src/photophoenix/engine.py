@@ -267,7 +267,7 @@ def try_header_path(plain):
     return None
 
 
-def restart_path(plain, scan_end, lib, folder):
+def restart_path(plain, scan_end, lib, folder, crop=False):
     data = plain[:scan_end]
     ms = [(m.start(), data[m.start() + 1] - 0xD0) for m in RST.finditer(data)]
     if len(ms) < 3: return None
@@ -316,8 +316,13 @@ def restart_path(plain, scan_end, lib, folder):
             hdr = make_header(D, D.w, D.h, None, dqt, keep_dri=True)
             jpg = hdr + bytes(body)
             q = quality(jpg, lost * dri // D.mw * D.bh, D)
-            r = dict(jpg=jpg, frac=full * dri / total, q=q, method="restart", dims=f"{D.w}x{D.h}")
+            r = dict(jpg=jpg, frac=full * dri / total, q=q, method="restart", dims=f"{D.w}x{D.h}",
+                     _rc=(D, dqt, lost, dri))
             if best is None or q < best["q"]: best = r
+    if best is not None:
+        D, dqt, lost, dri = best.pop("_rc")
+        if crop:
+            best["jpg_cropped"] = crop_restart(D, dqt, lost, dri, data, pos)
     return best
 
 
@@ -325,8 +330,9 @@ def render_full(D, w_px, h_px, sampling, dqt, buf, start, mcus, dcs, flats):
     hdr = make_header(D, w_px, h_px, sampling, dqt)
     Dm = fj.Donor(hdr)
     lost = Dm.total - mcus
+    corr = colour.estimate_v2(Dm, dcs, flats)
     try:
-        cm = correction_mcus(Dm, colour.estimate_v2(Dm, dcs, flats))
+        cm = correction_mcus(Dm, corr)
     except KeyError:
         return None
     if lost < len(cm): return None
@@ -334,10 +340,10 @@ def render_full(D, w_px, h_px, sampling, dqt, buf, start, mcus, dcs, flats):
     jpg = assemble(Dm, prefix, buf, start)
     q = quality(jpg, (lost // Dm.mw) * Dm.bh, Dm)
     return dict(jpg=jpg, frac=mcus / Dm.total, q=q, dims=f"{w_px}x{h_px}",
-                _args=(D, w_px, h_px, sampling, dqt if dqt is not None else dqt_of(D)), _Dm=Dm)
+                _args=(D, w_px, h_px, sampling, dqt if dqt is not None else dqt_of(D)), _Dm=Dm, _corr=corr)
 
 
-def align_path(plain, scan_end, lib, folder):
+def align_path(plain, scan_end, lib, folder, crop=False):
     """No restart markers: find the camera's tables, infer width from the data, pick quant tables."""
     buf = fj.destuff(plain[:scan_end])
     fb = len(buf) / (len(plain) + ENC_END)
@@ -416,13 +422,17 @@ def align_path(plain, scan_end, lib, folder):
     best = min(results, key=lambda r: r["q"])
     lib.hint[folder] = best.pop("_hint", None) or dict(lk=lk)
     best = apply_chroma_ratio(best, lib, folder, lib.groups[lk][0], dec["nY"], buf, start, mcus, dcs, flats)
-    for r in results:
-        for k in ("_hint", "_args", "_Dm"): r.pop(k, None)
+    if crop:
+        best["jpg_cropped"] = crop_align(best, buf, start, mcus)
+    for r in results + [best]:
+        for k in ("_hint", "_args", "_Dm", "_corr"): r.pop(k, None)
     return best
 
 
-def recover(path, lib, twin=None):
-    """Return dict(status, method, jpg|copy_from, frac, q, dims) or raise ValueError."""
+def recover(path, lib, twin=None, crop=False):
+    """Return dict(status, method, jpg|copy_from, frac, q, dims) or raise ValueError.
+    With crop=True, results that have a grey (lost) area also get "jpg_cropped": the same
+    photo without the grey rows, built losslessly (None if it can't be cropped)."""
     if twin:
         return dict(status="ok", method="copy", copy_from=twin, frac=1.0, q=1.0, dims="")
     e = _read(path)
@@ -432,9 +442,9 @@ def recover(path, lib, twin=None):
         r["status"] = "ok"; return r
     scan_end = first_marker(plain)
     if scan_end is None: scan_end = len(plain)
-    r = restart_path(plain, scan_end, lib, os.path.dirname(path))
+    r = restart_path(plain, scan_end, lib, os.path.dirname(path), crop)
     if r is None:
-        r = align_path(plain, scan_end, lib, os.path.dirname(path))
+        r = align_path(plain, scan_end, lib, os.path.dirname(path), crop)
     if r is None:
         raise ValueError("no matching camera found among healthy photos")
     r["status"] = "ok" if r["method"] == "restart" or r["q"] < 2.0 else "review"
@@ -719,7 +729,7 @@ def survey_chroma(lib, key, folder, D0, Dm, nY, mw):
 
 def apply_chroma_ratio(best, lib, folder, D0, nY, buf, start, mcus, dcs, flats):
     """If this camera stores colour more coarsely than brightness, re-render with a scaled chroma table."""
-    args, Dm = best.pop("_args", None), best.pop("_Dm", None)
+    args, Dm = best.get("_args"), best.get("_Dm")
     if not args or Dm is None:
         return best
     D, w_px, h_px, sampling, dqt = args
@@ -733,6 +743,64 @@ def apply_chroma_ratio(best, lib, folder, D0, nY, buf, start, mcus, dcs, flats):
     r = render_full(D, w_px, h_px, sampling, scale_chroma(dqt, Dm, ratio), buf, start, mcus, dcs, flats)
     if not r:
         return best
-    r.pop("_args", None); r.pop("_Dm", None)
     r["method"] = best["method"]; r["chroma_ratio"] = ratio
     return r
+
+
+# ---------------------------------------------------------------- lossless crop of the grey area
+# The grey area is the encrypted top of the photo. To drop it we don't decode and re-compress:
+# the new file simply starts at the first complete row of surviving blocks, so the picture
+# data is copied bit for bit (only the first block row's DC codes are re-encoded).
+def _bits(B, total_bits, a, b):
+    return format((B >> (total_bits - b)) & ((1 << (b - a)) - 1), "0%db" % (b - a)) if b > a else ""
+
+
+def crop_align(best, buf, start, mcus):
+    args, Dm, corr = best.get("_args"), best.get("_Dm"), best.get("_corr")
+    if not args or Dm is None or corr is None:
+        return None
+    D, w_px, h_px, sampling, dqt = args
+    mw, lost = Dm.mw, Dm.total - mcus
+    g0 = -(-lost // mw) * mw          # first complete block row after the lost area
+    skip, rows = g0 - lost, g0 // mw
+    if rows <= 0 or skip >= mcus - mw:
+        return None
+    lay, n = Dm.layout(), len(Dm.scan)
+    _, st, bit, (dc0, _) = fj.decode(buf, lay, n, start, stats=True, stop_mcu=skip)
+    if st != "stop":
+        return None
+    pred = [dc0[c][-1] if dc0[c] else 0 for c in range(n)]  # DC predictors entering that block
+    Dc = fj.Donor(make_header(D, w_px, h_px - rows * Dm.bh, sampling, dqt))
+    B, tb = int.from_bytes(buf, "big"), len(buf) * 8
+    head, cur = [], bit
+    try:
+        spans = fj.dc_spans(buf, lay, bit)
+    except (LookupError, IndexError):
+        return None
+    for b0, b1, ci, diff in spans:
+        head.append(_bits(B, tb, cur, b0))
+        new = pred[ci] + diff + corr[ci]  # absolute DC incl. colour correction; decoder starts at 0
+        cat = abs(new).bit_length()
+        table = Dc.dht[(0, Dc.scan[ci][1])]
+        if cat not in table:
+            return None
+        code, ln = table[cat]
+        head.append(bits_of(code, ln))
+        if cat:
+            head.append(format(new if new > 0 else new + (1 << cat) - 1, "0%db" % cat))
+        cur = b1
+    return assemble(Dc, "".join(head), buf, cur)
+
+
+def crop_restart(D, dqt, lost, dri, data, pos):
+    """Start at the first restart interval that begins a block row; renumber the markers."""
+    mw, total = D.mw, D.total
+    j = lost
+    while j * dri < total and (j * dri) % mw:
+        j += 1
+    k = j - lost  # interval j's data follows marker pos[k]
+    if j * dri >= total - mw or k >= len(pos):
+        return None
+    kept = RST.sub(lambda m: bytes((0xFF, 0xD0 + ((m.group()[1] - 0xD0 - j) % 8))), data[pos[k] + 2:])
+    rows = j * dri // mw
+    return make_header(D, D.w, D.h - rows * D.bh, None, dqt, keep_dri=True) + kept + EOI

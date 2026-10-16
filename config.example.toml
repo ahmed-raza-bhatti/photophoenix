@@ -31,5 +31,9 @@ min_free_ram_gb = 3.0
 # Run workers at idle CPU / very-low disk / low memory priority.
 low_priority = true
 
+# The encrypted top of each photo is shown grey. "keep" (original size, shows what's missing),
+# "crop" (remove the grey rows; lossless, photo becomes shorter) or "both" (full + "(cropped)" copy).
+grey_area = "keep"
+
 # Folder names (case-insensitive substrings) never searched for encrypted files.
 skip_dirs = ["$recycle.bin", "system volume information"]
