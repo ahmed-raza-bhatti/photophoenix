@@ -35,5 +35,8 @@ low_priority = true
 # "crop" (remove the grey rows; lossless, photo becomes shorter) or "both" (full + "(cropped)" copy).
 grey_area = "keep"
 
+# Also recover videos (MP4 / 3GP / MOV) whose index survived the encryption.
+include_videos = true
+
 # Folder names (case-insensitive substrings) never searched for encrypted files.
 skip_dirs = ["$recycle.bin", "system volume information"]

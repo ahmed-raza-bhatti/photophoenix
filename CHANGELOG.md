@@ -6,6 +6,10 @@ app redoes photos recovered by an older engine.
 
 ## [Unreleased]
 ### Added
+- Video recovery (MP4 / 3GP / MOV) for videos whose index survived at the end of the file: the
+  file header is rebuilt in front of the untouched media; full length with sound, only the first
+  moments are damaged (estimated in `report.csv`). Videos whose index was encrypted are reported
+  as not supported yet. "Include videos" option; `recover` works on videos too.
 - Grey-area choice: keep it, crop it off, or save both. Cropping is lossless (the new file starts
   at the first complete block row; picture data is copied, not re-compressed). `report.csv`
   marks cropped photos; changing the choice redoes affected photos. `recover --grey`.

@@ -1,7 +1,7 @@
 """Worker-process side of the app. Never modifies the encrypted files."""
 import json, os, shutil
 
-from . import config, copies, engine, safety
+from . import config, copies, engine, safety, video
 
 _lib, _copies, _settings = None, {}, None
 
@@ -34,6 +34,8 @@ def work(path, src, out, prev=None, grey="keep"):
     twin = _copies.get(os.path.normcase(os.path.abspath(path)))
     if twin and not os.path.exists(twin):
         twin = None
+    if video.is_video(path):
+        return _work_video(path, rel, out, prev, twin)
     try:
         r = engine.recover(path, _lib, twin, crop=grey in ("crop", "both"))
     except Exception as ex:
@@ -63,6 +65,29 @@ def work(path, src, out, prev=None, grey="keep"):
     return dict(file=rel, status=r["status"], method=r["method"], percent=round(r["frac"] * 100),
                 quality=round(r["q"], 2), dims=r["dims"], output=dest, cropped_output=cropped_out,
                 grey=grey, grey_note=note, ver=engine.ENGINE_VERSION)
+
+
+def _work_video(path, rel, out, prev, twin):
+    dest = os.path.join(out, rel[:-len(".coot")])
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    try:
+        if twin:
+            shutil.copyfile(twin, dest)
+            r = dict(status="ok", method="copy", frac=1.0, q=1.0, dims="", damaged_seconds=0)
+        else:
+            r = video.recover_video(path, dest)
+    except Exception as ex:
+        if os.path.exists(dest) and not twin:
+            try: os.remove(dest)  # don't leave a half-written video behind
+            except OSError: pass
+        return dict(file=rel, status="failed", detail=str(ex)[:100], ver=engine.ENGINE_VERSION, kind="video")
+    old = (prev or {}).get("output")
+    if old and _inside(old, out) and os.path.normcase(old) != os.path.normcase(dest) and os.path.isfile(old):
+        os.remove(old)
+    note = f"first ~{r['damaged_seconds']:g} s damaged" if r.get("damaged_seconds") else ""
+    return dict(file=rel, status=r["status"], method=r["method"], percent=round(r["frac"] * 100),
+                quality=r["q"], dims=r["dims"], output=dest, grey_note=note, kind="video",
+                ver=engine.ENGINE_VERSION)
 
 
 def _write(path, data):

@@ -40,6 +40,8 @@ class Settings:
     # The encrypted top of a photo is shown grey. "keep" (shows what's missing), "crop" (remove
     # the grey rows; lossless) or "both" (save the full photo and a "(cropped)" copy).
     grey_area: str = "keep"
+    # Also recover videos (MP4 / 3GP / MOV) whose index survived the encryption.
+    include_videos: bool = True
     # Folder names (case-insensitive substrings) never searched for encrypted files.
     skip_dirs: list = field(default_factory=lambda: ["$recycle.bin", "system volume information"])
 

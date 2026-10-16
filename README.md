@@ -79,6 +79,21 @@ both** (the full photo plus `… (cropped).jpg`). Cropping is lossless: the pict
 not re-compressed. `report.csv` marks cropped photos. Changing the choice later redoes the
 affected photos. Setting: `grey_area` in `config.toml`; command line: `recover --grey crop`.
 
+## Videos (MP4, 3GP, MOV)
+
+Videos are large, so the encrypted 150 KB is usually less than 1% of the file. What comes
+back depends on where the video's **index** (the table of where every frame is) was stored:
+
+| Index stored | Typical source | Result |
+|---|---|---|
+| **At the end** — survived | most Android phone camera apps | **The whole video plays**, full length, with sound. Only the first moments (whose data was encrypted) are glitchy — `report.csv` gives an estimate, usually 1–3 seconds. |
+| **At the start** — encrypted | iPhones, WhatsApp and other chat apps, video editors | **Not supported yet.** The video data is still there, but rebuilding its index is future work. These are listed as "failed" with that reason; keep the encrypted files. |
+| — | videos under ~150 KB | nothing to recover |
+
+On one real 250 GB drive, 196 of 440 encrypted videos had their index at the end. Untouched
+copies (see below) are restored complete for any video. Turn videos off with the
+**Include videos** box or `include_videos = false`.
+
 ## Teaching PhotoPhoenix your cameras
 
 A JPEG starts with a header: the "instructions" for reading the picture (size, compression
@@ -182,7 +197,8 @@ stay on your computer and are excluded from git.
 - The encrypted top part of each photo is gone; it is shown as a grey band or cropped off
   (see [The grey area](#the-grey-area-why-some-photos-have-one-and-others-dont)).
 - Colours are estimated when the camera didn't use restart markers; usually close, sometimes off.
-- Only baseline JPEG photos are handled (no PNG, video, documents, progressive JPEG yet).
+- Photos: only baseline JPEG (no PNG or progressive JPEG yet). Videos: only those whose index
+  survived. No documents yet.
 - Photos re-saved by editing apps with custom ("optimised") Huffman tables can't be matched.
 
 ## License

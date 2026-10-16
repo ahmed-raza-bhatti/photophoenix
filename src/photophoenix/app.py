@@ -9,9 +9,10 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-from . import __version__, config, copies, engine, safety
+from . import __version__, config, copies, engine, safety, video
 
 TITLE = "PhotoPhoenix"
+PHOTO_EXT = (".jpg.coot", ".jpeg.coot")
 GREY_EXPLAINER = """The grey area is the top part of a photo that was inside the encrypted 150 KB.
 That part of the picture can't be recovered: it is scrambled with a key only the
 attackers have.
@@ -63,7 +64,7 @@ class App:
         pad = dict(padx=8, pady=4)
         top = ttk.Frame(root); top.pack(fill="x", **pad)
         self.src = tk.StringVar(value=settings.source_dir); self.out = tk.StringVar(value=settings.output_dir)
-        for r, (label, var) in enumerate((("Encrypted photos", self.src), ("Save recovered to", self.out))):
+        for r, (label, var) in enumerate((("Encrypted files", self.src), ("Save recovered to", self.out))):
             ttk.Label(top, text=label).grid(row=r, column=0, sticky="w")
             ttk.Entry(top, textvariable=var).grid(row=r, column=1, sticky="ew", padx=6)
             ttk.Button(top, text="Browse…", command=lambda v=var: self.browse(v)).grid(row=r, column=2)
@@ -90,6 +91,8 @@ class App:
                             ("both", "Save both")):
             ttk.Radiobutton(grey, text=text, value=value, variable=self.grey).pack(side="left", padx=(8, 0))
         ttk.Button(grey, text="?", width=2, command=self.explain_grey).pack(side="left", padx=(8, 0))
+        self.videos = tk.BooleanVar(value=settings.include_videos)
+        ttk.Checkbutton(grey, text="Include videos", variable=self.videos).pack(side="right")
 
         self.progress = ttk.Progressbar(root, mode="determinate"); self.progress.pack(fill="x", **pad)
         self.status = tk.StringVar(value="Ready. Press Start.")
@@ -131,7 +134,7 @@ class App:
     def find_copies(self):
         src = os.path.abspath(self.src.get())
         if not os.path.isdir(src):
-            messagebox.showerror(TITLE, "Choose the encrypted photos folder first."); return
+            messagebox.showerror(TITLE, "Choose the encrypted files folder first."); return
         s = self.settings_for_run(src)
         roots = s.copy_roots()
         if not messagebox.askyesno(TITLE, COPIES_EXPLAINER.format(folders="\n".join("   " + r for r in roots))):
@@ -149,7 +152,7 @@ class App:
     def show_copies_result(self, st):
         total, found, verified = st.get("total", 0), st.get("found", 0), st.get("verified", 0)
         if not total:
-            messagebox.showinfo(TITLE, "No encrypted photos were found in the chosen folder."); return
+            messagebox.showinfo(TITLE, "No encrypted files were found in the chosen folder."); return
         if found == 0:
             msg = (f"No untouched copies found for any of the {total} encrypted files.\n\n"
                    "This is the most common result. It only means no exact copy is in the folders "
@@ -171,11 +174,11 @@ class App:
             messagebox.showerror(TITLE, "Choose both folders first."); return
         src, out = os.path.abspath(self.src.get()), os.path.abspath(self.out.get())
         if not os.path.isdir(src):
-            messagebox.showerror(TITLE, "The encrypted photos folder doesn't exist."); return
+            messagebox.showerror(TITLE, "The encrypted files folder doesn't exist."); return
         self.running = True; self.paused.clear(); self.stopping.clear()
         self.start_btn.config(state="disabled"); self.pause_btn.config(state="normal", text="Pause")
         self.stop_btn.config(state="normal")
-        threading.Thread(target=self.run, args=(src, out, int(self.workers.get()), self.grey.get()), daemon=True).start()
+        threading.Thread(target=self.run, args=(src, out, int(self.workers.get()), self.grey.get(), self.videos.get()), daemon=True).start()
 
     def toggle_pause(self):
         if self.paused.is_set(): self.paused.clear(); self.pause_btn.config(text="Pause")
@@ -194,7 +197,7 @@ class App:
         self.root.after(400, self.root.destroy)
 
     # ---------- background run ----------
-    def run(self, src, out, workers, grey="keep"):
+    def run(self, src, out, workers, grey="keep", videos=True):
         ev = self.events.put
         s = self.settings_for_run(src)
         os.makedirs(out, exist_ok=True)
@@ -210,14 +213,15 @@ class App:
             state = json.load(open(state_path, encoding="utf-8"))
         except Exception:
             state = {}
-        ev(("status", "Listing encrypted photos…"))
+        ev(("status", "Listing encrypted files…"))
         files, out_low = [], out.lower()
         skip = [d.lower() for d in s.skip_dirs] + [s.data_dir.lower()]
         for dp, dns, fs in os.walk(src):
             low = dp.lower()
             if low.startswith(out_low) or any(k in low for k in skip):
                 dns[:] = []; continue
-            files += [os.path.join(dp, f) for f in fs if f.lower().endswith((".jpg.coot", ".jpeg.coot"))]
+            exts = PHOTO_EXT + (tuple(e + ".coot" for e in video.VIDEO_EXT) if videos else ())
+            files += [os.path.join(dp, f) for f in fs if f.lower().endswith(exts)]
         files.sort()
 
         def outdated(r):
@@ -225,6 +229,8 @@ class App:
             # different grey-area choice (only photos that have a grey area are redone)
             if r.get("method") not in engine.REDO_METHODS:
                 return False
+            if r.get("kind") == "video":  # videos: only retry failures after an engine update
+                return r.get("status") == "failed" and r.get("ver") != engine.ENGINE_VERSION
             return r.get("ver") != engine.ENGINE_VERSION or (r.get("status") != "failed" and r.get("grey", "keep") != grey)
 
         todo = [f for f in files if os.path.relpath(f, src) not in state or outdated(state[os.path.relpath(f, src)])]
@@ -303,7 +309,7 @@ class App:
             self.counts = {"ok": 0, "review": 0, "failed": 0}; self.methods = {}
             for r in state.values(): self.count(r)
             self.progress.config(maximum=max(1, total), value=already)
-            self.log.insert("end", f"{total} encrypted photos, {already} done in an earlier run, {workers} workers")
+            self.log.insert("end", f"{total} encrypted files, {already} done in an earlier run, {workers} workers")
             if redo:
                 self.log.insert("end", f"{redo} photos from an earlier run will be redone with the improved engine {engine.ENGINE_VERSION}")
             self.update_status("")
@@ -315,7 +321,7 @@ class App:
             if r["status"] == "failed": self.log.itemconfig("end", fg="#b00020")
             elif r["status"] == "review": self.log.itemconfig("end", fg="#a15c00")
             if self.log.size() > 3000: self.log.delete(0, 500)
-            if "output" in r: self.show_preview(r["output"])
+            if "output" in r and r.get("kind") != "video": self.show_preview(r["output"])
             self.detail.set("")
             self.update_status(f" · about {self.fmt(eta)} left" if not self.paused.is_set() else "")
         elif kind == "pausing":
