@@ -4,6 +4,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Package version `0.x.y`
 engine version `x.y`; when results change, `ENGINE_VERSION` in `engine.py` is bumped so the
 app redoes photos recovered by an older engine.
 
+## [Unreleased]
+### Added
+- "Learn cameras from…" window: add healthy-photo folders or the whole PC to the camera library
+  at any time; learning adds to the existing library, can be stopped, keeps what it learned.
+- Honest explanation and result summary for "Find untouched copies".
+### Changed
+- Camera learning reads only the first 128 KB of each JPEG and skips system, program and
+  app-cache folders and images under 640×480. `build-library` now adds to the library
+  (`--replace` to start fresh).
+
 ## [0.3.3] — engine 3.3
 ### Added
 - Per-camera chroma step detection (fixes faded colours on cameras that store colour 2× coarser).

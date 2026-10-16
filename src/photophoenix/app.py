@@ -64,6 +64,7 @@ class App:
         ttk.Spinbox(bar, from_=1, to=settings.max_workers, width=3, textvariable=self.workers,
                     state="readonly").pack(side="left")
         ttk.Button(bar, text="Open output folder", command=self.open_out).pack(side="right")
+        ttk.Button(bar, text="Learn cameras from…", command=self.learn_cameras).pack(side="right", padx=(0, 6))
         self.copies_btn = ttk.Button(bar, text="Find untouched copies", command=self.find_copies)
         self.copies_btn.pack(side="right", padx=(0, 6))
 
@@ -94,6 +95,12 @@ class App:
     def settings_for_run(self, src):
         s = dataclasses.replace(self.cfg, source_dir=src)
         return s
+
+    def learn_cameras(self):
+        from .learn_window import LearnWindow
+        s = dataclasses.replace(self.cfg, source_dir=self.src.get().strip() or self.cfg.source_dir,
+                                output_dir=self.out.get().strip() or self.cfg.output_dir)
+        LearnWindow(self.root, s, TITLE)
 
     def find_copies(self):
         src = os.path.abspath(self.src.get())

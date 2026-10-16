@@ -51,6 +51,26 @@ Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m
 - **A computer with Python 3.11+.** No GPU, no accounts, no API keys, no paid services.
   About 200 MB of RAM per worker; 4 workers by default.
 
+## Teaching PhotoPhoenix your cameras
+
+A JPEG starts with a header: the "instructions" for reading the picture (size, compression
+tables, how colour is stored). STOP/Djvu destroyed that header in every photo, but each phone or
+camera model writes the same kind of header on all its photos. So PhotoPhoenix borrows the header
+of a **healthy photo from the same camera model** to read what survived. No part of the healthy
+photo's picture is used.
+
+- **First Start:** it learns automatically from healthy JPEGs in `donor_dirs` (default: the
+  encrypted-photos folder).
+- **Later, more sources:** press **Learn cameras from…**, add folders, or **Add whole PC** for
+  every drive, and press **Start learning**. New cameras are added to the existing library.
+  Command line: `python -m photophoenix build-library D:\ E:\Backup`.
+- **What is read:** only the first ~128 KB of each JPEG (the header). System, program and
+  app-cache folders, tiny images and encrypted files are skipped. It runs at low priority and
+  can be stopped at any time; whatever was learned is kept.
+- **What it helps with:** a camera PhotoPhoenix has a healthy photo from gets the most reliable
+  repair. Without one it estimates the settings from the data, which works for most photos but
+  occasionally gets colours wrong. It does **not** bring back the encrypted top part of a photo.
+
 ## Finding untouched copies: what to expect
 
 The **Find untouched copies** button checks whether an exact, unencrypted copy of any of your

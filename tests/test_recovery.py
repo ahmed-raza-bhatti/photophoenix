@@ -112,6 +112,35 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(copies.load(csv_path, [os.path.join(self.dir, "elsewhere")]), {})  # outside allowed roots
 
 
+class LibraryTests(unittest.TestCase):
+    def setUp(self):
+        os.makedirs(TMP_BASE, exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(dir=TMP_BASE); self.dir = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _put(self, rel, data):
+        p = os.path.join(self.dir, rel); os.makedirs(os.path.dirname(p), exist_ok=True); _write(p, data)
+
+    def test_learning_skips_system_folders_and_tiny_images_and_merges(self):
+        self._put("photos/a.jpg", jpeg_bytes(synthetic_photo(10)))                       # 1600x1200
+        self._put("photos/thumb.jpg", jpeg_bytes(synthetic_photo(11, 320, 240)))        # too small
+        self._put("AppData/cache/big.jpg", jpeg_bytes(synthetic_photo(12, 1200, 1600)))  # cache folder
+        first = engine.scan_library([self.dir])
+        self.assertEqual(len(first), 1)
+        self._put("more/b.jpg", jpeg_bytes(synthetic_photo(13, 1200, 1600)))            # a new size
+        merged, added = engine.merge_library(first, engine.scan_library([os.path.join(self.dir, "more")]))
+        self.assertEqual((len(merged), added), (2, 1))
+        merged2, added2 = engine.merge_library(merged, engine.scan_library([self.dir]))
+        self.assertEqual((len(merged2), added2), (2, 0))  # nothing new the second time
+
+    def test_learning_can_stop_early(self):
+        for i in range(3):
+            self._put(f"p/{i}.jpg", jpeg_bytes(synthetic_photo(20 + i)))
+        self.assertEqual(engine.scan_library([self.dir], should_stop=lambda: True), [])
+
+
 class ConfigTests(unittest.TestCase):
     def test_environment_overrides(self):
         os.environ["PHOTOPHOENIX_WORKERS"] = "2"; os.environ["PHOTOPHOENIX_DONOR_DIRS"] = "a;b"

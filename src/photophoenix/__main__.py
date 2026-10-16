@@ -2,7 +2,7 @@
 
   python -m photophoenix                         open the desktop app
   python -m photophoenix recover FILE.coot [-o OUT.jpg]
-  python -m photophoenix build-library [DIR ...] learn camera settings from healthy JPEGs
+  python -m photophoenix build-library [DIR ...] learn camera settings from healthy JPEGs (adds to library)
   python -m photophoenix find-copies             look for untouched copies of encrypted files
 """
 import argparse, json, multiprocessing, os, sys
@@ -18,7 +18,8 @@ def main(argv=None):
     r = sub.add_parser("recover", help="recover one encrypted photo")
     r.add_argument("file"); r.add_argument("-o", "--output")
     b = sub.add_parser("build-library", help="learn camera settings from healthy JPEGs")
-    b.add_argument("dirs", nargs="*", help="folders of healthy photos (default: donor_dirs / source_dir)")
+    b.add_argument("dirs", nargs="*", help="folders or drives of healthy photos (default: donor_dirs / source_dir)")
+    b.add_argument("--replace", action="store_true", help="start a new library instead of adding to the existing one")
     sub.add_parser("find-copies", help="find untouched copies of encrypted files (read-only)")
     a = ap.parse_args(argv)
 
@@ -34,11 +35,15 @@ def main(argv=None):
         roots = a.dirs or s.donor_roots()
         if not roots:
             sys.exit("Give folders of healthy JPEGs, or set donor_dirs / source_dir in config.toml.")
-        entries = engine.scan_library(roots, [s.data_dir.lower()] + [d.lower() for d in s.skip_dirs],
-                                      progress=lambda n: print(f"  {n} JPEGs read", flush=True))
+        new = engine.scan_library(roots, [s.data_dir.lower()] + [d.lower() for d in s.skip_dirs],
+                                  progress=lambda n: print(f"  {n} JPEG headers read", flush=True))
+        old = []
+        if not a.replace and os.path.exists(s.library_path):
+            with open(s.library_path, encoding="utf-8") as fh: old = json.load(fh)
+        merged, added = engine.merge_library(old, new)
         os.makedirs(s.data_dir, exist_ok=True)
-        with open(s.library_path, "w", encoding="utf-8") as fh: json.dump(entries, fh)
-        print(f"{len(entries)} camera/size types -> {s.library_path}")
+        with open(s.library_path, "w", encoding="utf-8") as fh: json.dump(merged, fh)
+        print(f"{added} new camera/size types learned; library now has {len(merged)} -> {s.library_path}")
     elif a.cmd == "find-copies":
         if not s.source_dir:
             sys.exit("Set source_dir (the folder with *.coot files) in config.toml or PHOTOPHOENIX_SOURCE_DIR.")
