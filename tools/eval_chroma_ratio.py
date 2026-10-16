@@ -5,7 +5,7 @@ drawing k photos at random), compared with per-photo decisions."""
 import os, random, sys
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-from stopgap import safety, fastjpeg as fj, engine
+from photophoenix import safety, fastjpeg as fj, engine
 
 safety.low_priority(background=True)
 

@@ -7,9 +7,9 @@ app redoes photos recovered by an older engine.
 ## [0.3.3] — engine 3.3
 ### Added
 - Per-camera chroma step detection (fixes faded colours on cameras that store colour 2× coarser).
-- Configurable settings (`config.toml`, `.env`, `STOPGAP_*`), command line, synthetic tests.
+- Configurable settings (`config.toml`, `.env`, `PHOTOPHOENIX_*`), command line, synthetic tests.
 ### Changed
-- Repository restructured as the `stopgap` package; renamed to STOPgap.
+- Repository restructured as the `photophoenix` package; renamed to PhotoPhoenix.
 
 ## engine 3.2
 - Quant tables chosen by the 0..255 range rule in every path (fixes garish, over-amplified colours).

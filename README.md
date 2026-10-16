@@ -1,4 +1,4 @@
-# STOPgap
+# PhotoPhoenix
 
 **Recover your photos from STOP/Djvu ransomware — no ransom, no key.**
 
@@ -8,18 +8,18 @@ renames files with extensions like `.coot`, `.djvu`, `.boop`, `.mzlq` and leaves
 key cannot be decrypted by anyone except the attackers.
 
 But STOP/Djvu only encrypts the **first 150 KB** of each file. In a typical 1–4 MB phone
-photo, 85–97% of the image data is still there, untouched. STOPgap rebuilds a viewable
+photo, 85–97% of the image data is still there, untouched. PhotoPhoenix rebuilds a viewable
 JPEG from that surviving data. It works entirely offline, on your own computer.
 
 | What you get | When |
 |---|---|
-| **100%** of the photo | an untouched copy exists somewhere (backup, phone transfer, chat download) — STOPgap finds and verifies it |
+| **100%** of the photo | an untouched copy exists somewhere (backup, phone transfer, chat download) — PhotoPhoenix finds and verifies it |
 | **Nearly 100%** | the photo's own JPEG header happens to lie beyond the encrypted part |
 | **Most of the photo, exact colours** | the camera used JPEG restart markers (common on older phones) |
 | **Most of the photo, estimated colours** | everything else with enough data — the top strip that was encrypted stays grey |
 | **Nothing** | files smaller than ~150 KB were encrypted completely |
 
-> STOPgap does **not** decrypt anything and never contacts the attackers or any server.
+> PhotoPhoenix does **not** decrypt anything and never contacts the attackers or any server.
 > If you are a victim: don't pay, keep the encrypted files (keys sometimes leak and the free
 > [Emsisoft STOP/Djvu decryptor](https://www.emsisoft.com/ransomware-decryption/stop-djvu/)
 > may help with *offline* keys), and scan your PC — cracked software "activators" are a
@@ -32,20 +32,20 @@ JPEG from that surviving data. It works entirely offline, on your own computer.
    ```
    pip install -r requirements.txt
    ```
-3. Double-click **`Run STOPgap.bat`**.
+3. Double-click **`Run PhotoPhoenix.bat`**.
 4. Choose the folder with the encrypted files and an empty folder for the results, press **Start**.
 
 The first run learns your cameras' JPEG settings from healthy photos (see below), then
 recovers every `*.jpg.coot` / `*.jpeg.coot` file. Pause, Resume and Stop at any time;
 starting again with the same folders picks up where it left off.
 
-Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m stopgap`.
+Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m photophoenix`.
 
 ## What you need to provide
 
-- **The encrypted files.** Work on a copy if you can; STOPgap never modifies them anyway.
+- **The encrypted files.** Work on a copy if you can; PhotoPhoenix never modifies them anyway.
 - **Some healthy, unencrypted JPEGs**, ideally from the same phones or cameras (photos you
-  sent to others, cloud backups, an old SD card, a folder the ransomware missed). STOPgap
+  sent to others, cloud backups, an old SD card, a folder the ransomware missed). PhotoPhoenix
   learns each camera's JPEG settings from them. Without any, it can still infer most
   settings from the data itself, just less reliably.
 - **A computer with Python 3.11+.** No GPU, no accounts, no API keys, no paid services.
@@ -55,28 +55,28 @@ Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m
 
 Defaults work for most people. To change them, copy `config.example.toml` to `config.toml`
 (or `.env.example` to `.env`) and edit. Every setting can also be an environment variable
-`STOPGAP_<NAME>`. The important ones:
+`PHOTOPHOENIX_<NAME>`. The important ones:
 
 | Setting | Meaning |
 |---|---|
 | `source_dir` / `output_dir` | default folders shown in the app |
 | `donor_dirs` | folders of healthy JPEGs to learn cameras from |
 | `copy_search_dirs` | folders searched for untouched copies — nothing else is ever searched |
-| `workers`, `min_free_ram_gb`, `low_priority` | how hard STOPgap works your computer |
+| `workers`, `min_free_ram_gb`, `low_priority` | how hard PhotoPhoenix works your computer |
 
 ## Command line
 
 ```
-python -m stopgap                          # the desktop app
-python -m stopgap build-library DIR [DIR]  # learn cameras from healthy JPEGs
-python -m stopgap find-copies              # find untouched copies (source_dir, copy_search_dirs)
-python -m stopgap recover FILE.jpg.coot -o OUT.jpg
+python -m photophoenix                          # the desktop app
+python -m photophoenix build-library DIR [DIR]  # learn cameras from healthy JPEGs
+python -m photophoenix find-copies              # find untouched copies (source_dir, copy_search_dirs)
+python -m photophoenix recover FILE.jpg.coot -o OUT.jpg
 ```
-(Set `PYTHONPATH=src`, or `pip install -e .` once and use the `stopgap` command.)
+(Set `PYTHONPATH=src`, or `pip install -e .` once and use the `photophoenix` command.)
 
 ## Privacy
 
-STOPgap runs offline and reads only the folders you choose. The camera library
+PhotoPhoenix runs offline and reads only the folders you choose. The camera library
 (`local/library.json`) and copy list (`local/copies.csv`) contain paths to your photos; they
 stay on your computer and are excluded from git.
 

@@ -1,10 +1,10 @@
-"""Settings for STOPgap.
+"""Settings for PhotoPhoenix.
 
 Precedence (later wins): built-in defaults < config.toml < .env < environment variables.
 
-- config.toml: path from STOPGAP_CONFIG, else ./config.toml (see config.example.toml)
+- config.toml: path from PHOTOPHOENIX_CONFIG, else ./config.toml (see config.example.toml)
 - .env:        ./.env (see .env.example); simple KEY=VALUE lines
-- environment: STOPGAP_<SETTING>, e.g. STOPGAP_WORKERS=2
+- environment: PHOTOPHOENIX_<SETTING>, e.g. PHOTOPHOENIX_WORKERS=2
 
 Nothing machine-specific lives in the source code; everything here can be overridden.
 """
@@ -85,16 +85,16 @@ def _coerce(name, value, default):
 def load(config_path=None):
     s = Settings()
     defaults = {f.name: getattr(s, f.name) for f in fields(Settings)}
-    path = config_path or os.environ.get("STOPGAP_CONFIG") or os.path.join(PROJECT_ROOT, "config.toml")
+    path = config_path or os.environ.get("PHOTOPHOENIX_CONFIG") or os.path.join(PROJECT_ROOT, "config.toml")
     if os.path.isfile(path):
         with open(path, "rb") as fh:
             for k, v in tomllib.load(fh).items():
                 if k in defaults:
                     setattr(s, k, _coerce(k, v, defaults[k]))
     env = _read_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-    env.update({k: v for k, v in os.environ.items() if k.startswith("STOPGAP_")})
+    env.update({k: v for k, v in os.environ.items() if k.startswith("PHOTOPHOENIX_")})
     for k, v in env.items():
-        name = k[len("STOPGAP_"):].lower() if k.startswith("STOPGAP_") else None
+        name = k[len("PHOTOPHOENIX_"):].lower() if k.startswith("PHOTOPHOENIX_") else None
         if name in defaults:
             setattr(s, name, _coerce(name, v, defaults[name]))
     s.workers = max(1, min(s.workers, s.max_workers))

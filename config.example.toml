@@ -1,5 +1,5 @@
-# STOPgap configuration. Copy to config.toml (git-ignored) and edit.
-# Every value can also be set in .env or as an environment variable STOPGAP_<NAME>.
+# PhotoPhoenix configuration. Copy to config.toml (git-ignored) and edit.
+# Every value can also be set in .env or as an environment variable PHOTOPHOENIX_<NAME>.
 # Paths may be absolute or relative to the project folder.
 
 # Folder with the encrypted *.coot files (searched recursively). Can also be chosen in the app.
@@ -9,7 +9,7 @@ source_dir = ""
 output_dir = ""
 
 # Folders with healthy (NOT encrypted) JPEG photos, ideally from the same cameras/phones.
-# STOPgap learns each camera's JPEG settings from them. Empty = use source_dir.
+# PhotoPhoenix learns each camera's JPEG settings from them. Empty = use source_dir.
 donor_dirs = []
 
 # Folders searched for untouched copies of encrypted files (backups, phone transfers, ...).
