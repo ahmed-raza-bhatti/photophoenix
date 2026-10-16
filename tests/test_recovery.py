@@ -103,8 +103,10 @@ class RecoveryTests(unittest.TestCase):
         backup = os.path.join(self.dir, "backup"); os.makedirs(backup)
         _write(os.path.join(backup, "renamed.jpg"), original)
         csv_path = os.path.join(self.dir, "copies.csv")
-        found = copies.find(os.path.dirname(enc), [backup], csv_path, progress=lambda m: None)
+        stats = {}
+        found = copies.find(os.path.dirname(enc), [backup], csv_path, progress=lambda m: None, stats=stats)
         self.assertEqual(len(found), 1)
+        self.assertEqual(stats, {"total": 1, "found": 1, "verified": 1})
         self.assertEqual(found[enc][1], "verified-bytes")
         self.assertIn(os.path.normcase(os.path.abspath(enc)), copies.load(csv_path, [backup]))
         self.assertEqual(copies.load(csv_path, [os.path.join(self.dir, "elsewhere")]), {})  # outside allowed roots

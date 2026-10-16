@@ -42,7 +42,14 @@ def main(argv=None):
     elif a.cmd == "find-copies":
         if not s.source_dir:
             sys.exit("Set source_dir (the folder with *.coot files) in config.toml or PHOTOPHOENIX_SOURCE_DIR.")
-        copies.find(s.source_dir, s.copy_roots(), s.copies_path, skip=[d.lower() for d in s.skip_dirs])
+        st = {}
+        copies.find(s.source_dir, s.copy_roots(), s.copies_path, skip=[d.lower() for d in s.skip_dirs], stats=st)
+        if st.get("found"):
+            print(f"{st['found']} of {st['total']} encrypted files will be restored complete from copies "
+                  f"({st['verified']} verified byte-for-byte, {st['found'] - st['verified']} by name and size only).")
+        else:
+            print("No untouched copies found (the most common result). Recovery will repair photos from "
+                  "the surviving data. Add backup folders to copy_search_dirs to search more places.")
     elif a.cmd == "recover":
         if not os.path.exists(s.library_path):
             sys.exit(f"No camera library yet: run 'python -m photophoenix build-library DIR' first ({s.library_path}).")

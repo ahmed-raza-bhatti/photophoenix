@@ -13,7 +13,7 @@ JPEG from that surviving data. It works entirely offline, on your own computer.
 
 | What you get | When |
 |---|---|
-| **100%** of the photo | an untouched copy exists somewhere (backup, phone transfer, chat download) — PhotoPhoenix finds and verifies it |
+| **100%** of the photo | an exact, untouched copy of the file is on a drive you point PhotoPhoenix to — [rare; see below](#finding-untouched-copies-what-to-expect) |
 | **Nearly 100%** | the photo's own JPEG header happens to lie beyond the encrypted part |
 | **Most of the photo, exact colours** | the camera used JPEG restart markers (common on older phones) |
 | **Most of the photo, estimated colours** | everything else with enough data — the top strip that was encrypted stays grey |
@@ -50,6 +50,46 @@ Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m
   settings from the data itself, just less reliably.
 - **A computer with Python 3.11+.** No GPU, no accounts, no API keys, no paid services.
   About 200 MB of RAM per worker; 4 workers by default.
+
+## Finding untouched copies: what to expect
+
+The **Find untouched copies** button checks whether an exact, unencrypted copy of any of your
+encrypted photos sits in folders you choose. A copy gives the whole photo back. It is worth
+one try, but **for most people it finds few or no copies.** Please read this before relying on it.
+
+**How it decides a file is a copy.** STOP/Djvu keeps a file's size (plus 334 bytes it adds at
+the end) and leaves everything after the first 150 KB untouched. So a file that is exactly
+334 bytes smaller *and* whose bytes after 150 KB are identical is the same file, even if it
+was renamed. Files smaller than about 160 KB can't be compared this way and are matched by
+name and size only (less certain).
+
+**What it will find**
+- The exact same file saved twice: a folder you copied to another drive, a backup, a USB stick
+  or SD card, an old phone's folder you copied to the PC, a file transfer app's folder
+  (SHAREit, Xender, Nearby Share), photos you *received* in WhatsApp and saved elsewhere.
+
+**What it will NOT find**
+- **Copies that were re-saved or compressed.** Photos you *sent* through WhatsApp, Messenger,
+  Facebook, Instagram or e-mail apps that shrink images are different files. Their pixels may
+  look the same, but their bytes are not, so they don't count as copies. (They *can* still help
+  as "healthy photos" for learning your camera's settings.)
+- **Anything in folders you didn't choose.** It doesn't search your whole computer, your phone,
+  or the cloud. To use Google Photos, OneDrive, iCloud or a phone, first download/copy those
+  photos into a folder, then add that folder to `copy_search_dirs`.
+- **Copies on drives the ransomware also encrypted.** STOP/Djvu encrypts every drive connected
+  at the time, including USB drives that were plugged in.
+
+**What happens**
+1. It shows you the exact folders it will read and asks before starting.
+2. It only reads files; it never changes, moves, deletes or uploads anything.
+3. It tells you how many encrypted photos have a copy (and how many of those were verified
+   byte-for-byte), and saves the list in `local/copies.csv`.
+4. On **Start**, photos with a copy are restored by copying that file; all others are
+   repaired as usual. Finding no copies changes nothing else.
+
+**Real-world example:** on one victim's 250 GB drive with 21,000 encrypted files, about 1 in
+20 had an untouched copy, almost all of them WhatsApp images that had also been moved to
+another folder by a file transfer app. Camera photos almost never had copies.
 
 ## Settings
 
