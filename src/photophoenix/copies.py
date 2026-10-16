@@ -47,8 +47,9 @@ def same_tail(enc, cand, size):
         return False
 
 
-def find(enc_root, search_roots, out_csv, skip=(), progress=print):
-    """Index encrypted files under enc_root, look for originals under search_roots, write out_csv."""
+def find(enc_root, search_roots, out_csv, skip=(), progress=print, stats=None):
+    """Index encrypted files under enc_root, look for originals under search_roots, write out_csv.
+    If `stats` is a dict, it receives total / found / verified counts."""
     t0 = time.time()
     enc = [(p, n[:-5], s - TRAILER) for p, n, s in walk(enc_root, skip) if n.lower().endswith(".coot") and s > TRAILER]
     by_size = {}
@@ -75,6 +76,9 @@ def find(enc_root, search_roots, out_csv, skip=(), progress=print):
         w = csv.writer(fh); w.writerow(COLUMNS)
         for k, (p, how, s) in sorted(found.items()): w.writerow([k, p, how, s])
     progress(f"{len(found)} of {len(enc)} encrypted files have an untouched copy -> {out_csv}")
+    if stats is not None:
+        stats.update(total=len(enc), found=len(found),
+                     verified=sum(1 for v in found.values() if v[1] == "verified-bytes"))
     return found
 
 

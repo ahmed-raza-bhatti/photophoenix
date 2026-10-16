@@ -12,6 +12,26 @@ from tkinter import ttk, filedialog, messagebox
 from . import __version__, config, copies, engine, safety
 
 TITLE = "PhotoPhoenix"
+COPIES_EXPLAINER = """Look for exact, unencrypted copies of your encrypted photos?
+
+A copy gives a photo back complete. Most people find few or none, so don't count on it.
+
+It WILL find: the exact same file saved twice, e.g. a folder copied to another drive, a
+backup, a USB stick or SD card, a file-transfer app's folder, photos received in a chat app
+and saved again.
+
+It will NOT find:
+ - photos that were re-saved or shrunk (most photos you SENT via WhatsApp, Facebook,
+   Instagram, e-mail): they look the same but are different files
+ - anything outside the folders below (not your whole PC, phone or cloud)
+ - copies on drives the ransomware also encrypted
+
+It only reads files. Nothing is changed, moved, deleted or uploaded.
+
+Folders that will be searched:
+{folders}
+
+(To add more, list them under copy_search_dirs in config.toml.) Start the search?"""
 SAVE_EVERY = 25  # results between progress.json saves (keeps disk writes low)
 ICONS = {"ok": "✔", "review": "?", "failed": "✘"}
 
@@ -44,6 +64,7 @@ class App:
         ttk.Spinbox(bar, from_=1, to=settings.max_workers, width=3, textvariable=self.workers,
                     state="readonly").pack(side="left")
         ttk.Button(bar, text="Open output folder", command=self.open_out).pack(side="right")
+        ttk.Button(bar, text="Learn cameras from…", command=self.learn_cameras).pack(side="right", padx=(0, 6))
         self.copies_btn = ttk.Button(bar, text="Find untouched copies", command=self.find_copies)
         self.copies_btn.pack(side="right", padx=(0, 6))
 
@@ -75,21 +96,49 @@ class App:
         s = dataclasses.replace(self.cfg, source_dir=src)
         return s
 
+    def learn_cameras(self):
+        from .learn_window import LearnWindow
+        s = dataclasses.replace(self.cfg, source_dir=self.src.get().strip() or self.cfg.source_dir,
+                                output_dir=self.out.get().strip() or self.cfg.output_dir)
+        LearnWindow(self.root, s, TITLE)
+
     def find_copies(self):
         src = os.path.abspath(self.src.get())
         if not os.path.isdir(src):
             messagebox.showerror(TITLE, "Choose the encrypted photos folder first."); return
         s = self.settings_for_run(src)
         roots = s.copy_roots()
-        if not messagebox.askyesno(TITLE, "Search these folders for untouched copies of encrypted files?\n\n"
-                                   + "\n".join(roots) + "\n\n(read-only; change copy_search_dirs in config.toml)"):
+        if not messagebox.askyesno(TITLE, COPIES_EXPLAINER.format(folders="\n".join("   " + r for r in roots))):
             return
         self.copies_btn.config(state="disabled")
         def job():
-            copies.find(src, roots, s.copies_path, skip=[d.lower() for d in s.skip_dirs],
-                        progress=lambda m: self.events.put(("detail", m)))
-            self.events.put(("copies_done",))
+            stats = {}
+            try:
+                copies.find(src, roots, s.copies_path, skip=[d.lower() for d in s.skip_dirs],
+                            progress=lambda m: self.events.put(("detail", m)), stats=stats)
+            finally:
+                self.events.put(("copies_done", stats))
         threading.Thread(target=job, daemon=True).start()
+
+    def show_copies_result(self, st):
+        total, found, verified = st.get("total", 0), st.get("found", 0), st.get("verified", 0)
+        if not total:
+            messagebox.showinfo(TITLE, "No encrypted photos were found in the chosen folder."); return
+        if found == 0:
+            msg = (f"No untouched copies found for any of the {total} encrypted files.\n\n"
+                   "This is the most common result. It only means no exact copy is in the folders "
+                   "searched. Press Start to repair the photos from the data that survived.\n\n"
+                   "If you have backups, old phones, SD cards or downloaded cloud photos, copy them "
+                   "into a folder, add it to copy_search_dirs in config.toml, and search again.")
+        else:
+            unsure = found - verified
+            msg = (f"Untouched copies found for {found} of {total} encrypted files "
+                   f"({found / total:.1%}).\n\n"
+                   f"   {verified} verified byte-for-byte (certain)\n"
+                   + (f"   {unsure} matched by name and size only (small files; very likely, not certain)\n" if unsure else "")
+                   + f"\nWhen you press Start, these {found} will be restored complete from their copies. "
+                   f"The other {total - found} will be repaired from the surviving data as usual.")
+        messagebox.showinfo(TITLE, msg)
 
     def start(self):
         if not self.src.get().strip() or not self.out.get().strip():
@@ -214,6 +263,8 @@ class App:
             self.detail.set(e[1])
         elif kind == "copies_done":
             self.copies_btn.config(state="normal")
+            self.detail.set("")
+            self.show_copies_result(e[1])
         elif kind == "init":
             _, total, already, state, workers, redo = e
             self.total, self.done = total, already

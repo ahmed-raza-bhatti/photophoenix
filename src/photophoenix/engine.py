@@ -43,37 +43,86 @@ def layout_key(D):
     return (D.tables_id, blocks, tuple((td, ta) for _, td, ta in D.scan))
 
 
-def read_header(path, limit=1 << 20):
+def read_header(path, limit=128 << 10):
+    """Parse only the start of a JPEG (headers are almost always within 128 KB); read more
+    only if needed. Keeps whole-drive learning light on disks."""
     with open(path, "rb") as fh:
         data = fh.read(limit)
-    try:
-        return fj.Donor(data, path)
-    except Exception:
-        with open(path, "rb") as fh:
-            return fj.Donor(fh.read(), path)
+        try:
+            return fj.Donor(data, path)
+        except Exception:
+            if len(data) < limit:  # that was the whole file: not a usable JPEG
+                raise
+        data += fh.read()
+    return fj.Donor(data, path)
 
 
-def scan_library(roots, skip=(), progress=None):
-    """Find one healthy baseline JPEG per (tables, layout, restart interval, size)."""
+# Folder names never worth reading when learning from a whole drive: system files, program
+# files and app caches (web thumbnails, icons) are not camera photos.
+SYSTEM_DIR_NAMES = {"windows", "windows.old", "program files", "program files (x86)", "programdata",
+                    "appdata", "$recycle.bin", "system volume information", "$windows.~bt", "$windows.~ws",
+                    "recovery", "perflogs", "msocache", "node_modules", ".git", "site-packages"}
+MIN_DONOR_PIXELS = 640 * 480  # smaller images are web thumbnails, not useful camera headers
+
+
+def library_key(D):
+    return (repr(layout_key(D)), D.sampling, D.dri, D.w, D.h)
+
+
+def scan_library(roots, skip=(), progress=None, should_stop=None, skip_names=SYSTEM_DIR_NAMES):
+    """Find one healthy baseline JPEG per (tables, layout, restart interval, size).
+    Only headers are read and kept (no image data). `skip`: path substrings to avoid;
+    `skip_names`: folder names to avoid anywhere; `should_stop()`: return True to stop early."""
     seen, counts, n = {}, collections.Counter(), 0
     for root in roots:
         for dp, dns, fs in os.walk(root):
             low = dp.lower()
             if any(s in low for s in skip):
                 dns[:] = []; continue
+            dns[:] = [d for d in dns if d.lower() not in skip_names]
             for f in fs:
                 if not f.lower().endswith(JPEG_EXT): continue
+                if should_stop and should_stop():
+                    return _entries(seen, counts)
                 p = os.path.join(dp, f); n += 1
-                if progress and n % 500 == 0: progress(n)
+                if progress and n % 200 == 0: progress(n)
                 try:
                     D = read_header(p)
                 except Exception:
                     continue
-                if len(D.scan) not in (1, 3): continue
+                if len(D.scan) not in (1, 3) or D.w * D.h < MIN_DONOR_PIXELS: continue
                 lk = layout_key(D); counts[repr(lk)] += 1
-                key = (repr(lk), D.sampling, D.dri, D.w, D.h)
-                seen.setdefault(key, (p, D.segs.hex()))
+                seen.setdefault(library_key(D), (p, D.segs.hex()))
+    if progress: progress(n)
+    return _entries(seen, counts)
+
+
+def _entries(seen, counts):
     return [dict(path=p, segs=s, layout=k[0], count=counts[k[0]]) for k, (p, s) in seen.items()]
+
+
+def merge_library(old, new):
+    """Add newly learned camera types to an existing library. Returns (merged, added)."""
+    def key(e):
+        try:
+            return library_key(fj.Donor(bytes.fromhex(e["segs"])))
+        except Exception:
+            return None
+    merged = {key(e): e for e in old}
+    merged.pop(None, None)
+    pop = collections.Counter()
+    for e in old: pop[e["layout"]] = max(pop[e["layout"]], e.get("count", 1))
+    added = 0
+    newpop = collections.Counter()
+    for e in new: newpop[e["layout"]] = max(newpop[e["layout"]], e.get("count", 1))
+    for e in new:
+        k = key(e)
+        if k is not None and k not in merged:
+            merged[k] = e; added += 1
+    for layout, c in newpop.items(): pop[layout] += c  # popularity orders which cameras are tried first
+    out = list(merged.values())
+    for e in out: e["count"] = pop[e["layout"]]
+    return out, added
 
 
 class Library:
