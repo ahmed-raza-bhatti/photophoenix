@@ -10,6 +10,9 @@ app redoes photos recovered by an older engine.
   index is written using a healthy reference video's codec settings (picture only, no sound).
   The reference is chosen by test-decoding with ffmpeg; "review" when a few frames may glitch.
   Reference videos are learned with the camera library (`local/video_refs.json`).
+- Sound for those videos: each AAC frame's exact length is measured with FFmpeg's decoder via
+  PyAV (shortest prefix that decodes; exact on every frame checked), and video timing follows the
+  audio clock so lip-sync holds on variable-frame-rate phone videos. Optional: `requirements-optional.txt`.
 - Video recovery (MP4 / 3GP / MOV) for videos whose index survived at the end of the file: the
   file header is rebuilt in front of the untouched media; full length with sound, only the first
   moments are damaged (estimated in `report.csv`). Videos whose index was encrypted are reported

@@ -87,13 +87,13 @@ back depends on where the video's **index** (the table of where every frame is) 
 | Index stored | Typical source | Result |
 |---|---|---|
 | **At the end** — survived | most Android phone camera apps | **The whole video plays**, full length, with sound. Only the first moments (whose data was encrypted) are glitchy — `report.csv` gives an estimate, usually 1–3 seconds. |
-| **At the start** — encrypted | many phone camera apps, iPhones, chat apps, editors | **Picture only, no sound — if a healthy video from the same phone exists.** PhotoPhoenix finds every H.264 frame in the surviving data and writes a new index, borrowing the codec settings from a healthy reference video; [ffmpeg](https://ffmpeg.org) must be installed to pick the right reference. Without a matching reference the video is listed as failed with that reason; keep it and add healthy videos from that phone via **Learn cameras from…**. |
+| **At the start** — encrypted | many phone camera apps, iPhones, chat apps, editors | **Picture and sound — if a healthy video from the same phone exists.** PhotoPhoenix finds every H.264 frame in the surviving data, measures every AAC sound frame with FFmpeg's decoder, and writes a new index using a healthy reference video's settings, timed by the sound so lip-sync holds. Needs [ffmpeg](https://ffmpeg.org) installed; sound needs `pip install -r requirements-optional.txt` (PyAV), otherwise picture only. Without a matching reference the video is listed as failed with that reason; add healthy videos from that phone via **Learn cameras from…**. |
 | — | videos under ~150 KB | nothing to recover |
 
 On one real 250 GB drive, 196 of 440 encrypted videos had their index at the end. Of the rest,
 a sample rebuilt only where a healthy video from the same phone existed (e.g. 45 s and 141 s
 1080p videos); the healthy "reference" from one phone turned out to be broken itself, so its
-videos couldn't be rebuilt. Sound for rebuilt videos is future work. Untouched
+videos couldn't be rebuilt. Rebuilt videos had sound with no audio decode errors. Untouched
 copies (see below) are restored complete for any video. Turn videos off with the
 **Include videos** box or `include_videos = false`.
 

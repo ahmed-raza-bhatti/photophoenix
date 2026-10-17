@@ -57,8 +57,8 @@ class RebuildTests(unittest.TestCase):
                         "-c:a", "aac", "-shortest", "-movflags", "+faststart", p], check=True)
         return p
 
-    def frame_hashes(self, path):
-        out = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", "0:v", "-f", "framemd5", "-"],
+    def frame_hashes(self, path, stream="0:v"):
+        out = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", stream, "-f", "framemd5", "-"],
                              capture_output=True, text=True, check=True).stdout
         return [l.split(",")[-1].strip() for l in out.splitlines() if l and not l.startswith("#")]
 
@@ -77,6 +77,16 @@ class RebuildTests(unittest.TestCase):
         got, want = self.frame_hashes(out), self.frame_hashes(src)
         self.assertGreater(len(got), 0.7 * len(want))           # most frames survived
         self.assertEqual(got[-200:], want[-200:])                 # and they are pixel-identical
+        try:
+            import av  # noqa: F401  (sound needs PyAV)
+        except ImportError:
+            return
+        self.assertIn("sound", info["note"])
+        got_a, want_a = self.frame_hashes(out, "0:a"), self.frame_hashes(src, "0:a")
+        self.assertGreater(len(got_a), 0.7 * len(want_a))         # most of the sound survived
+        # bit-identical once decoded (the original trims the encoder's padding on its very last
+        # frame in its index; the rebuilt index can't know that, so the last frame is excluded)
+        self.assertEqual(got_a[-300:-1], want_a[-300:-1])
 
     def test_wrong_reference_is_rejected(self):
         ref_dir = os.path.join(self.dir, "refs"); os.makedirs(ref_dir)

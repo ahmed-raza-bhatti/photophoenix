@@ -1,4 +1,4 @@
-"""Rebuild the index of videos whose index (moov) was encrypted. Picture only, no sound (yet).
+"""Rebuild the index of videos whose index (moov) was encrypted: picture, and sound when possible.
 
 Phone and app videos that put the index at the START ("fast start") lose it to the encryption,
 but the video data after it usually survives. H.264 video in MP4 is stored as length-prefixed
@@ -6,6 +6,11 @@ NAL units, so the frames can be found by walking the data; audio chunks in betwe
 The codec settings (resolution, profile: the `stsd` box) were in the lost index, so they come from
 a healthy reference video made by the same phone/app. Which reference fits is decided by trying
 each on a short test clip and letting ffmpeg count decode errors (the right one gives ~0).
+
+Sound: AAC frames sit in the gaps between video frames with no markers or lengths; their sizes
+were only in the lost index. A frame's length is found by asking FFmpeg's AAC decoder (via PyAV,
+optional): the shortest prefix that decodes cleanly is exactly one frame (even 1 byte short fails).
+Measured against intact files: exact for every frame, ~3 ms per frame. Without PyAV: picture only.
 
 The file is read through mmap (the OS page cache), so multi-GB videos don't fill RAM.
 """
@@ -48,7 +53,36 @@ def ref_from_moov(moov, path=""):
         delta = struct.unpack(">I", moov[stts[0] + 12:stts[0] + 16])[0]
         w = struct.unpack(">I", moov[tkhd[1] - 8:tkhd[1] - 4])[0] >> 16
         h = struct.unpack(">I", moov[tkhd[1] - 4:tkhd[1]])[0] >> 16
-        return dict(stsd=stsd.hex(), nal_len=(stsd[i + 8] & 3) + 1, ts=ts, delta=delta, w=w, h=h, path=path)
+        return dict(stsd=stsd.hex(), nal_len=(stsd[i + 8] & 3) + 1, ts=ts, delta=delta, w=w, h=h, path=path,
+                    audio=audio_from_moov(moov))
+    return None
+
+
+def audio_from_moov(moov):
+    """AAC audio track settings: stsd box bytes, AudioSpecificConfig, timescale, frame delta."""
+    for t2, b2, c2, d2 in _boxes(moov, 8, len(moov)):
+        if t2 != b"trak": continue
+        hd = _child(moov, c2, d2, [b"mdia", b"hdlr"])
+        if not hd or moov[hd[0] + 8:hd[0] + 12] != b"soun": continue
+        mdhd = _child(moov, c2, d2, [b"mdia", b"mdhd"])
+        stbl = _child(moov, c2, d2, [b"mdia", b"minf", b"stbl"])
+        if not (mdhd and stbl): return None
+        stsd = next((moov[bb:dd] for tt, bb, cc, dd in _boxes(moov, *stbl) if tt == b"stsd"), None)
+        stts = _child(moov, stbl[0], stbl[1], [b"stts"])
+        if not stsd or b"mp4a" not in stsd or not stts: return None
+        i = stsd.find(b"esds")
+        j = stsd.find(b"\x05", i + 12)                    # DecoderSpecificInfo tag
+        if i < 0 or j < 0: return None
+        k = j + 1; ln = 0
+        while True:                                       # expandable length
+            ln = (ln << 7) | (stsd[k] & 0x7F); k += 1
+            if not stsd[k - 1] & 0x80: break
+        asc = stsd[k:k + ln]
+        if len(asc) < 2 or (asc[0] >> 3) != 2: return None  # AAC-LC only
+        v = moov[mdhd[0]]
+        ts = struct.unpack(">I", moov[mdhd[0] + (20 if v else 12):mdhd[0] + (24 if v else 16)])[0]
+        delta = struct.unpack(">I", moov[stts[0] + 12:stts[0] + 16])[0]
+        return dict(stsd=stsd.hex(), asc=asc.hex(), ts=ts, delta=delta)
     return None
 
 
@@ -205,18 +239,133 @@ def walk_frames(mm, start, end, nal_len=4):
     return [(o, s, k) for o, s, k, sl in frames if sl]
 
 
+# ---------------------------------------------------------------- sound
+def _adts_maker(asc):
+    obj = asc[0] >> 3; sfi = ((asc[0] & 7) << 1) | (asc[1] >> 7); ch = (asc[1] >> 3) & 15
+
+    def adts(payload):
+        n = len(payload) + 7
+        return bytes([0xFF, 0xF1, ((obj - 1) << 6) | (sfi << 2) | (ch >> 2), ((ch & 3) << 6) | (n >> 11),
+                      (n >> 3) & 0xFF, ((n & 7) << 5) | 0x1F, 0xFC]) + payload
+    return adts, max(1, ch)
+
+
+def split_aac(mm, gaps, asc):
+    """Exact AAC frames inside the gaps between video frames: [(offset, size)]. Needs PyAV."""
+    try:
+        import av
+    except ImportError:
+        return None
+    adts, ch = _adts_maker(asc)
+    biggest = 768 * ch + 64                       # AAC frames are at most 6144 bits per channel
+
+    def decodes(data):
+        ctx = av.CodecContext.create("aac", "r")
+        try:
+            ctx.decode(av.Packet(adts(data))); return True
+        except av.error.FFmpegError:
+            return False
+
+    out = []
+    for a, b in gaps:
+        pos = a
+        while pos < b:
+            hi = min(b - pos, biggest)
+            if hi < 4 or not decodes(mm[pos:pos + hi]):
+                break                             # not (or no longer) AAC: skip the rest of this gap
+            lo = 1
+            while lo < hi:                        # shortest prefix that decodes = one whole frame
+                mid = (lo + hi) // 2
+                if decodes(mm[pos:pos + mid]): hi = mid
+                else: lo = mid + 1
+            out.append((pos, lo)); pos += lo
+    return out
+
+
+def video_deltas(frames, gaps, afr, ref, audio, anchor_every=1.0):
+    """Per-frame durations (video timescale) that follow the sound: phones record at a variable
+    frame rate, but every AAC frame is exactly `delta` samples, so the audio is a precise clock.
+    A run of video frames covers the same time as the audio chunk after it; anchors about every
+    second, with frames spread evenly between them, keep lip-sync without jerky motion."""
+    if not afr:
+        return None
+    a_dt = audio["delta"] / audio["ts"]
+    gap_idx, counts, j = [], [0] * len(gaps), 0
+    for off, _ in afr:                      # audio frames per gap (both lists are in file order)
+        while j < len(gaps) and off >= gaps[j][1]: j += 1
+        if j < len(gaps) and gaps[j][0] <= off: counts[j] += 1
+    ends = {g[0]: i for i, g in enumerate(gaps)}
+    anchors, t = [(0, 0.0)], 0.0            # (frame index, time in seconds) at the start of each run
+    for i, (o, sz, _) in enumerate(frames):
+        g = ends.get(o + sz)
+        if g is not None and counts[g]:
+            t += counts[g] * a_dt
+            if i + 1 < len(frames) and t - anchors[-1][1] >= anchor_every:
+                anchors.append((i + 1, t))
+    total = len(frames)
+    if len(anchors) < 2:
+        return None
+    vts, out, carry = ref["ts"], [], 0.0
+    for (fa, ta), (fb, tb) in zip(anchors, anchors[1:] + [(total, None)]):
+        if tb is None:                      # after the last anchor: keep the last rate
+            per = (anchors[-1][1] - anchors[-2][1]) / max(1, anchors[-1][0] - anchors[-2][0]) if len(anchors) > 1 else ref["delta"] / vts
+        else:
+            per = (tb - ta) / max(1, fb - fa)
+        for _ in range(fb - fa):
+            exact = per * vts + carry
+            d = max(1, int(round(exact))); carry = exact - d
+            out.append(d)
+    return out
+
+
+def audio_settings(ref):
+    a = ref.get("audio")
+    if a is None and ref.get("path") and os.path.exists(ref["path"]):  # library made before sound support
+        moov = _read_moov(ref["path"])
+        a = audio_from_moov(moov) if moov else None
+    return a
+
+
 # ---------------------------------------------------------------- writing a file
 def _box(t, p): return struct.pack(">I4s", 8 + len(p), t) + p
 def _full(t, p, v=0, f=0): return _box(t, struct.pack(">I", (v << 24) | f) + p)
 
 
-def build_moov(ref, frames, base):
-    """moov with one video track; frame offsets shifted by `base`."""
+def _audio_trak(audio, afr, base, movie_ms):
+    n = len(afr)
+    stbl = _box(b"stbl", bytes.fromhex(audio["stsd"])
+                + _full(b"stts", struct.pack(">III", 1, n, audio["delta"]))
+                + _full(b"stsc", struct.pack(">IIII", 1, 1, 1, 1))
+                + _full(b"stsz", struct.pack(">II", 0, n) + struct.pack(">%dI" % n, *[s for _, s in afr]))
+                + _full(b"co64", struct.pack(">I", n) + struct.pack(">%dQ" % n, *[o + base for o, _ in afr])))
+    dinf = _box(b"dinf", _full(b"dref", struct.pack(">I", 1) + _full(b"url ", b"", 0, 1)))
+    minf = _box(b"minf", _full(b"smhd", b"\0" * 4) + dinf + stbl)
+    hdlr = _full(b"hdlr", b"\0" * 4 + b"soun" + b"\0" * 12 + b"SoundHandler\0")
+    dur = n * audio["delta"]
+    mdhd = _full(b"mdhd", struct.pack(">IIII", 0, 0, audio["ts"], dur) + b"\x55\xc4\0\0")
+    matrix = struct.pack(">9I", 0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000)
+    tkhd = _full(b"tkhd", struct.pack(">IIIII", 0, 0, 2, 0, dur * 1000 // audio["ts"]) + b"\0" * 8
+                 + struct.pack(">HHHH", 0, 1, 0x100, 0) + matrix + b"\0" * 8, 0, 3)
+    return _box(b"trak", tkhd + _box(b"mdia", mdhd + hdlr + minf))
+
+
+def _stts(deltas):
+    runs = []
+    for d in deltas:
+        if runs and runs[-1][1] == d: runs[-1][0] += 1
+        else: runs.append([1, d])
+    return _full(b"stts", struct.pack(">I", len(runs)) + b"".join(struct.pack(">II", c, d) for c, d in runs))
+
+
+def build_moov(ref, frames, base, audio=None, afr=None, deltas=None):
+    """moov with a video track (and an AAC track if given); offsets shifted by `base`.
+    deltas: per-frame durations (default: the reference's constant frame duration)."""
     n = len(frames)
-    dur = n * ref["delta"]
+    deltas = deltas or [ref["delta"]] * n
+    dur = sum(deltas)
     keys = [i + 1 for i, (_, _, k) in enumerate(frames) if k]
     stbl = _box(b"stbl", bytes.fromhex(ref["stsd"])
-                + _full(b"stts", struct.pack(">III", 1, n, ref["delta"]))
+                + _stts(deltas)
                 + (_full(b"stss", struct.pack(">I", len(keys)) + struct.pack(">%dI" % len(keys), *keys)) if keys else b"")
                 + _full(b"stsc", struct.pack(">IIII", 1, 1, 1, 1))
                 + _full(b"stsz", struct.pack(">II", 0, n) + struct.pack(">%dI" % n, *[s for _, s, _ in frames]))
@@ -230,14 +379,17 @@ def build_moov(ref, frames, base):
     tkhd = _full(b"tkhd", struct.pack(">IIIII", 0, 0, 1, 0, ms) + b"\0" * 8 + b"\0" * 8 + matrix
                  + struct.pack(">II", ref["w"] << 16, ref["h"] << 16), 0, 3)
     mvhd = _full(b"mvhd", struct.pack(">IIII", 0, 0, 1000, ms) + struct.pack(">IH", 0x10000, 0x100)
-                 + b"\0" * 10 + matrix + b"\0" * 24 + struct.pack(">I", 2))
-    return _box(b"moov", mvhd + _box(b"trak", tkhd + _box(b"mdia", mdhd + hdlr + minf)))
+                 + b"\0" * 10 + matrix + b"\0" * 24 + struct.pack(">I", 3))
+    tracks = _box(b"trak", tkhd + _box(b"mdia", mdhd + hdlr + minf))
+    if audio and afr:
+        tracks += _audio_trak(audio, afr, base, ms)
+    return _box(b"moov", mvhd + tracks)
 
 
 FTYP = struct.pack(">I4s4sI", 24, b"ftyp", b"isom", 512) + b"isomavc1"
 
 
-def write_video(dest, mm, frames, ref, media_from, media_to):
+def write_video(dest, mm, frames, ref, media_from, media_to, audio=None, afr=None, deltas=None):
     """ftyp + 64-bit mdat holding mm[media_from:media_to] + moov. Streams; returns nothing."""
     base = len(FTYP) + 16 - media_from
     with open(dest, "wb") as w:
@@ -246,7 +398,7 @@ def write_video(dest, mm, frames, ref, media_from, media_to):
         p = media_from
         while p < media_to:
             q = min(media_to, p + (8 << 20)); w.write(mm[p:q]); p = q
-        w.write(build_moov(ref, frames, base))
+        w.write(build_moov(ref, frames, base, audio, afr, deltas))
 
 
 def decode_errors(path, ffmpeg):
@@ -332,12 +484,23 @@ def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries
                 ref, rate, status = cands[0], None, "review"  # can't verify without ffmpeg
             else:
                 raise ValueError("index was encrypted; choosing a reference video needs ffmpeg installed")
-            write_video(dest, mm, frames, ref, frames[0][0], frames[-1][0] + frames[-1][1])
+            # sound: split the gaps between video frames into AAC frames
+            audio, afr, deltas = audio_settings(ref), None, None
+            if audio:
+                gaps = [(frames[i][0] + frames[i][1], frames[i + 1][0]) for i in range(len(frames) - 1)
+                        if frames[i + 1][0] > frames[i][0] + frames[i][1]]
+                last_end = frames[-1][0] + frames[-1][1]
+                if olen > last_end: gaps.append((last_end, olen))
+                afr = split_aac(mm, gaps, bytes.fromhex(audio["asc"]))
+                deltas = video_deltas(frames, gaps, afr, ref, audio)
+            media_to = max(frames[-1][0] + frames[-1][1], (afr[-1][0] + afr[-1][1]) if afr else 0)
+            write_video(dest, mm, frames, ref, frames[0][0], media_to, audio, afr, deltas)
         finally:
             mm.close()
-    seconds = len(frames) * ref["delta"] / ref["ts"]
+    seconds = (sum(deltas) if deltas else len(frames) * ref["delta"]) / ref["ts"]
     keys = sum(1 for f in frames if f[2])
     return dict(method="video-rebuilt", status=status, frac=1.0, q=1.0, dims=f"{seconds:.0f} s", ref=ref,
                 frames=len(frames), keyframes=keys,
-                note="picture only (no sound); index rebuilt" + ("; a few frames may glitch" if status == "review" else ""),
+                note=("picture and sound; index rebuilt" if afr else "picture only (no sound); index rebuilt")
+                     + ("; a few frames may glitch" if status == "review" else ""), audio_frames=len(afr or []),
                 reference=os.path.basename(ref.get("path", "")), resolution=f"{ref['w']}x{ref['h']}")
