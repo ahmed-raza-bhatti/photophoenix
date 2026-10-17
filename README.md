@@ -1,6 +1,6 @@
 # PhotoPhoenix
 
-**Recover your photos from STOP/Djvu ransomware — no ransom, no key.**
+**Recover your photos and videos from STOP/Djvu ransomware — no ransom, no key.**
 
 STOP/Djvu is one of the most widespread ransomware families aimed at home users. It
 renames files with extensions like `.coot`, `.djvu`, `.boop`, `.mzlq` and leaves a
@@ -9,7 +9,8 @@ key cannot be decrypted by anyone except the attackers.
 
 But STOP/Djvu only encrypts the **first 150 KB** of each file. In a typical 1–4 MB phone
 photo, 85–97% of the image data is still there, untouched. PhotoPhoenix rebuilds a viewable
-JPEG from that surviving data. It works entirely offline, on your own computer.
+JPEG from that surviving data, and plays videos again (see [Videos](#videos-mp4-3gp-mov)).
+It works entirely offline, on your own computer.
 
 | What you get | When |
 |---|---|
@@ -32,12 +33,16 @@ JPEG from that surviving data. It works entirely offline, on your own computer.
    ```
    pip install -r requirements.txt
    ```
+   For videos, also install [ffmpeg](https://ffmpeg.org) (on your PATH) and, for their sound,
+   `pip install -r requirements-optional.txt`.
 3. Double-click **`Run PhotoPhoenix.bat`**.
-4. Choose the folder with the encrypted files and an empty folder for the results, press **Start**.
+4. Choose the folder with the encrypted files and an empty folder for the results, pick
+   **Recover: Photos and videos / Photos only / Videos only**, and press **Start**.
 
-The first run learns your cameras' JPEG settings from healthy photos (see below), then
-recovers every `*.jpg.coot` / `*.jpeg.coot` file. Pause, Resume and Stop at any time;
-starting again with the same folders picks up where it left off.
+The first run learns your cameras' settings from healthy photos and videos (see below), then
+recovers every `*.jpg.coot` / `*.jpeg.coot` photo and `*.mp4.coot` / `*.3gp.coot` / `*.mov.coot`
+video. The **Working on** list shows each file in progress and its current step. Pause, Resume
+and Stop at any time; starting again with the same folders picks up where it left off.
 
 Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m photophoenix`.
 
@@ -48,6 +53,8 @@ Linux / macOS: `pip install -r requirements.txt`, then `PYTHONPATH=src python -m
   sent to others, cloud backups, an old SD card, a folder the ransomware missed). PhotoPhoenix
   learns each camera's JPEG settings from them. Without any, it can still infer most
   settings from the data itself, just less reliably.
+- **For videos whose index was encrypted: one original video from the same phone model** (yours,
+  a friend's, or a review site's camera sample — [see below](#no-healthy-video-from-that-phone-borrow-one)).
 - **A computer with Python 3.11+.** No GPU, no accounts, no API keys, no paid services.
   About 200 MB of RAM per worker; 4 workers by default.
 
@@ -133,6 +140,8 @@ photo's picture is used.
 - **What is read:** only the first ~128 KB of each JPEG (the header). System, program and
   app-cache folders, tiny images and encrypted files are skipped. It runs at low priority and
   can be stopped at any time; whatever was learned is kept.
+- **Videos too:** the same learning also notes the settings of healthy MP4/MOV videos it finds
+  (`local/video_refs.json`), used to rebuild videos whose index was encrypted.
 - **What it helps with:** a camera PhotoPhoenix has a healthy photo from gets the most reliable
   repair. Without one it estimates the settings from the data, which works for most photos but
   occasionally gets colours wrong. It does **not** bring back the encrypted top part of a photo.
@@ -188,22 +197,26 @@ Defaults work for most people. To change them, copy `config.example.toml` to `co
 | `source_dir` / `output_dir` | default folders shown in the app |
 | `donor_dirs` | folders of healthy JPEGs to learn cameras from |
 | `copy_search_dirs` | folders searched for untouched copies — nothing else is ever searched |
+| `recover` | `both` (default), `photos` or `videos` |
+| `grey_area` | `keep` (default), `crop` or `both` — see [The grey area](#the-grey-area-why-some-photos-have-one-and-others-dont) |
 | `workers`, `min_free_ram_gb`, `low_priority` | how hard PhotoPhoenix works your computer |
 
 ## Command line
 
 ```
 python -m photophoenix                          # the desktop app
-python -m photophoenix build-library DIR [DIR]  # learn cameras from healthy JPEGs
+python -m photophoenix build-library DIR [DIR]  # learn cameras from healthy photos and videos
 python -m photophoenix find-copies              # find untouched copies (source_dir, copy_search_dirs)
 python -m photophoenix recover FILE.jpg.coot -o OUT.jpg
+python -m photophoenix recover FILE.mp4.coot -o OUT.mp4
 ```
 (Set `PYTHONPATH=src`, or `pip install -e .` once and use the `photophoenix` command.)
 
 ## Privacy
 
 PhotoPhoenix runs offline and reads only the folders you choose. The camera library
-(`local/library.json`) and copy list (`local/copies.csv`) contain paths to your photos; they
+(`local/library.json`), reference-video list (`local/video_refs.json`) and copy list
+(`local/copies.csv`) contain paths to your photos; they
 stay on your computer and are excluded from git.
 
 ## Documentation
@@ -220,8 +233,11 @@ stay on your computer and are excluded from git.
 - The encrypted top part of each photo is gone; it is shown as a grey band or cropped off
   (see [The grey area](#the-grey-area-why-some-photos-have-one-and-others-dont)).
 - Colours are estimated when the camera didn't use restart markers; usually close, sometimes off.
-- Photos: only baseline JPEG (no PNG or progressive JPEG yet). Videos: only those whose index
-  survived. No documents yet.
+- Photos: only baseline JPEG (no PNG or progressive JPEG yet).
+- Videos whose index was encrypted: only H.264 video with AAC sound (most phones since ~2012),
+  and only with an original video from the same phone model. Old 3GP videos (H.263/MPEG-4) and
+  AVI aren't supported yet. A few frames may glitch; the first moment of every video is lost.
+- No documents (PDF, Word, …) or music yet.
 - Photos re-saved by editing apps with custom ("optimised") Huffman tables can't be matched.
 
 ## License
