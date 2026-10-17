@@ -17,6 +17,9 @@ app redoes photos recovered by an older engine.
 - "Learn cameras from…" window: add healthy-photo folders or the whole PC to the camera library
   at any time; learning adds to the existing library, can be stopped, keeps what it learned.
 - Honest explanation and result summary for "Find untouched copies".
+### Fixed
+- "Find untouched copies" replaced the whole copy list, so searching a second folder wiped the
+  copies found earlier. Searches now add to the list (entries whose files are gone are dropped).
 ### Changed
 - Camera learning reads only the first 128 KB of each JPEG and skips system, program and
   app-cache folders and images under 640×480. `build-library` now adds to the library

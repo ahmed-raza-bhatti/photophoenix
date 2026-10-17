@@ -167,6 +167,8 @@ class App:
                    + (f"   {unsure} matched by name and size only (small files; very likely, not certain)\n" if unsure else "")
                    + f"\nWhen you press Start, these {found} will be restored complete from their copies. "
                    f"The other {total - found} will be repaired from the surviving data as usual.")
+        if st.get("in_list", found) > found:
+            msg += f"\n\nCopies found by earlier searches are kept: the list now holds {st['in_list']} in total."
         messagebox.showinfo(TITLE, msg)
 
     def start(self):

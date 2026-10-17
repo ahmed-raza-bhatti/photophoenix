@@ -71,15 +71,28 @@ def find(enc_root, search_roots, out_csv, skip=(), progress=print, stats=None):
                         found[encp] = (path, "verified-bytes", size)
                 elif name.lower() == encname.lower():
                     found[encp] = (path, "name+size (too small to verify)", size)
+    # Add to the existing list instead of replacing it: earlier searches (other folders, other
+    # backup drives) stay. New matches win; entries whose files no longer exist are dropped.
+    merged = {k: v for k, v in _read_rows(out_csv).items() if os.path.exists(k) and os.path.exists(v[0])}
+    merged.update(found)
     os.makedirs(os.path.dirname(os.path.abspath(out_csv)), exist_ok=True)
-    with open(out_csv, "w", newline="", encoding="utf-8") as fh:
+    tmp = out_csv + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh); w.writerow(COLUMNS)
-        for k, (p, how, s) in sorted(found.items()): w.writerow([k, p, how, s])
-    progress(f"{len(found)} of {len(enc)} encrypted files have an untouched copy -> {out_csv}")
+        for k, (p, how, s) in sorted(merged.items()): w.writerow([k, p, how, s])
+    os.replace(tmp, out_csv)
+    progress(f"{len(found)} of {len(enc)} encrypted files have an untouched copy; list now has {len(merged)} -> {out_csv}")
     if stats is not None:
         stats.update(total=len(enc), found=len(found),
-                     verified=sum(1 for v in found.values() if v[1] == "verified-bytes"))
+                     verified=sum(1 for v in found.values() if v[1] == "verified-bytes"), in_list=len(merged))
     return found
+
+
+def _read_rows(csv_path):
+    if not os.path.exists(csv_path):
+        return {}
+    with open(csv_path, encoding="utf-8") as fh:
+        return {r["encrypted"]: (r["original_copy"], r["match"], int(r["size"] or 0)) for r in csv.DictReader(fh)}
 
 
 def load(csv_path, allowed_roots):
