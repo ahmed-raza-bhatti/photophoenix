@@ -13,6 +13,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 
 GREY_MODES = ("keep", "crop", "both")
+RECOVER_MODES = ("both", "photos", "videos")
 PROJECT_ROOT =os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -40,12 +41,20 @@ class Settings:
     # The encrypted top of a photo is shown grey. "keep" (shows what's missing), "crop" (remove
     # the grey rows; lossless) or "both" (save the full photo and a "(cropped)" copy).
     grey_area: str = "keep"
+    # What to recover: "both", "photos" or "videos".
+    recover: str = "both"
+    # Older setting kept for existing config files: false means photos only.
+    include_videos: bool = True
     # Folder names (case-insensitive substrings) never searched for encrypted files.
     skip_dirs: list = field(default_factory=lambda: ["$recycle.bin", "system volume information"])
 
     @property
     def library_path(self):
         return os.path.join(self.data_dir, "library.json")
+
+    @property
+    def video_refs_path(self):
+        return os.path.join(self.data_dir, "video_refs.json")
 
     @property
     def copies_path(self):
@@ -104,6 +113,10 @@ def load(config_path=None):
     s.workers = max(1, min(s.workers, s.max_workers))
     if s.grey_area not in GREY_MODES:
         s.grey_area = "keep"
+    if s.recover not in RECOVER_MODES:
+        s.recover = "both"
+    if not s.include_videos and s.recover == "both":
+        s.recover = "photos"
     # relative paths are relative to the project folder, not to wherever the app was started
     rel = lambda p: p if not p or os.path.isabs(p) else os.path.join(PROJECT_ROOT, p)
     s.source_dir, s.output_dir = rel(s.source_dir), rel(s.output_dir)

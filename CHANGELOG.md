@@ -6,6 +6,19 @@ app redoes photos recovered by an older engine.
 
 ## [Unreleased]
 ### Added
+- "Recover: Photos and videos / Photos only / Videos only" choice in the app (`recover` setting;
+  replaces the "Include videos" box; old `include_videos = false` still means photos only).
+- Videos whose index was encrypted: the H.264 frames are found in the surviving data and a new
+  index is written using a healthy reference video's codec settings (picture only, no sound).
+  The reference is chosen by test-decoding with ffmpeg; "review" when a few frames may glitch.
+  Reference videos are learned with the camera library (`local/video_refs.json`).
+- Sound for those videos: each AAC frame's exact length is measured with FFmpeg's decoder via
+  PyAV (shortest prefix that decodes; exact on every frame checked), and video timing follows the
+  audio clock so lip-sync holds on variable-frame-rate phone videos. Optional: `requirements-optional.txt`.
+- Video recovery (MP4 / 3GP / MOV) for videos whose index survived at the end of the file: the
+  file header is rebuilt in front of the untouched media; full length with sound, only the first
+  moments are damaged (estimated in `report.csv`). Videos whose index was encrypted are reported
+  as not supported yet. "Include videos" option; `recover` works on videos too.
 - Grey-area choice: keep it, crop it off, or save both. Cropping is lossless (the new file starts
   at the first complete block row; picture data is copied, not re-compressed). `report.csv`
   marks cropped photos; changing the choice redoes affected photos. `recover --grey`.
@@ -13,6 +26,17 @@ app redoes photos recovered by an older engine.
 - "Learn cameras from…" window: add healthy-photo folders or the whole PC to the camera library
   at any time; learning adds to the existing library, can be stopped, keeps what it learned.
 - Honest explanation and result summary for "Find untouched copies".
+- When videos fail for lack of a reference video, the app explains how to get one (your own
+  original, a friend's, or a phone review site's camera sample such as GSMArena's), and those
+  videos are retried automatically once new reference videos are learned.
+### Fixed
+- Cuts in the sound of rebuilt videos: (1) audio bytes that looked like a frame start became
+  oversized fake video frames that swallowed whole audio chunks — lone frame starts now need a
+  plausible size and a clean ending (another NAL or real AAC); (2) every AAC frame was given the
+  reference's first (odd) duration, so players inserted a gap after each frame — AAC frames are now
+  always 1024 (or 960) samples, and video uses the reference's most common frame duration.
+- "Find untouched copies" replaced the whole copy list, so searching a second folder wiped the
+  copies found earlier. Searches now add to the list (entries whose files are gone are dropped).
 ### Changed
 - Camera learning reads only the first 128 KB of each JPEG and skips system, program and
   app-cache folders and images under 640×480. `build-library` now adds to the library

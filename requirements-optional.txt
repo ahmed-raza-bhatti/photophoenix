@@ -1,0 +1,5 @@
+# Optional extras.
+# Sound for videos whose index was encrypted: FFmpeg's AAC decoder via PyAV measures each
+# audio frame's length. Without it those videos come back picture-only.
+av>=12
+# Also install ffmpeg itself (https://ffmpeg.org) to rebuild videos whose index was encrypted.

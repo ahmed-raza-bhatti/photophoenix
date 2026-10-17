@@ -7,7 +7,7 @@
 """
 import argparse, json, multiprocessing, os, sys
 
-from . import __version__, config, copies, engine, safety
+from . import __version__, config, copies, engine, safety, video, video_index
 
 
 def main(argv=None):
@@ -15,7 +15,7 @@ def main(argv=None):
     ap.add_argument("--version", action="version", version=f"PhotoPhoenix {__version__} (engine {engine.ENGINE_VERSION})")
     ap.add_argument("--config", help="path to config.toml")
     sub = ap.add_subparsers(dest="cmd")
-    r = sub.add_parser("recover", help="recover one encrypted photo")
+    r = sub.add_parser("recover", help="recover one encrypted photo or video")
     r.add_argument("file"); r.add_argument("-o", "--output")
     r.add_argument("--grey", choices=config.GREY_MODES, help="keep the grey (lost) area, crop it off, or save both")
     b = sub.add_parser("build-library", help="learn camera settings from healthy JPEGs")
@@ -45,6 +45,9 @@ def main(argv=None):
         os.makedirs(s.data_dir, exist_ok=True)
         with open(s.library_path, "w", encoding="utf-8") as fh: json.dump(merged, fh)
         print(f"{added} new camera/size types learned; library now has {len(merged)} -> {s.library_path}")
+        vadded, vtotal = video_index.update_ref_library(s.video_refs_path, roots, [s.data_dir.lower()] + [d.lower() for d in s.skip_dirs],
+                                                        skip_names=engine.SYSTEM_DIR_NAMES)
+        print(f"{vadded} new reference video settings; {vtotal} in total -> {s.video_refs_path}")
     elif a.cmd == "find-copies":
         if not s.source_dir:
             sys.exit("Set source_dir (the folder with *.coot files) in config.toml or PHOTOPHOENIX_SOURCE_DIR.")
@@ -56,6 +59,23 @@ def main(argv=None):
         else:
             print("No untouched copies found (the most common result). Recovery will repair photos from "
                   "the surviving data. Add backup folders to copy_search_dirs to search more places.")
+    elif a.cmd == "recover" and video.is_video(a.file):
+        out = a.output or (a.file[:-len(".coot")] if a.file.lower().endswith(".coot") else a.file + ".recovered.mp4")
+        if os.path.exists(out) and not a.output:
+            root, ext = os.path.splitext(out); out = root + ".recovered" + ext
+        twin = copies.load(s.copies_path, s.copy_roots()).get(os.path.normcase(os.path.abspath(a.file)))
+        if twin:
+            import shutil; shutil.copyfile(twin, out); print(f"ok: restored from an untouched copy -> {out}")
+        else:
+            try:
+                res = video.recover_video(a.file, out)
+                print(f"ok: video {res['dims']}, first ~{res['damaged_seconds']:g} s damaged -> {out}")
+            except ValueError as ex:
+                if "index was at the start" not in str(ex):
+                    raise
+                res = video_index.rebuild(a.file, out, video_index.load_refs(s.video_refs_path), temp_dir=s.temp_dir)
+                print(f"{res['status']}: video {res['dims']}, {res['frames']} frames, {res['resolution']}, "
+                      f"{res['note']} (reference: {res['reference']}) -> {out}")
     elif a.cmd == "recover":
         if not os.path.exists(s.library_path):
             sys.exit(f"No camera library yet: run 'python -m photophoenix build-library DIR' first ({s.library_path}).")

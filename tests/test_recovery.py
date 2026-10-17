@@ -128,10 +128,16 @@ class RecoveryTests(unittest.TestCase):
         stats = {}
         found = copies.find(os.path.dirname(enc), [backup], csv_path, progress=lambda m: None, stats=stats)
         self.assertEqual(len(found), 1)
-        self.assertEqual(stats, {"total": 1, "found": 1, "verified": 1})
+        self.assertEqual(stats, {"total": 1, "found": 1, "verified": 1, "in_list": 1})
         self.assertEqual(found[enc][1], "verified-bytes")
         self.assertIn(os.path.normcase(os.path.abspath(enc)), copies.load(csv_path, [backup]))
         self.assertEqual(copies.load(csv_path, [os.path.join(self.dir, "elsewhere")]), {})  # outside allowed roots
+        # a later search of another folder (finding nothing) must not wipe the earlier result
+        other = os.path.join(self.dir, "other"); os.makedirs(other)
+        st2 = {}
+        copies.find(other, [other], csv_path, progress=lambda m: None, stats=st2)
+        self.assertEqual((st2["found"], st2["in_list"]), (0, 1))
+        self.assertIn(os.path.normcase(os.path.abspath(enc)), copies.load(csv_path, [backup]))
 
 
 class LibraryTests(unittest.TestCase):
@@ -173,6 +179,18 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(s.donor_dirs, [os.path.join(config.PROJECT_ROOT, "a"), os.path.join(config.PROJECT_ROOT, "b")])
         finally:
             del os.environ["PHOTOPHOENIX_WORKERS"], os.environ["PHOTOPHOENIX_DONOR_DIRS"]
+
+    def test_recover_choice_and_old_setting(self):
+        os.environ["PHOTOPHOENIX_RECOVER"] = "videos"
+        try:
+            self.assertEqual(config.load(config_path=os.path.join(TMP_BASE, "none.toml")).recover, "videos")
+        finally:
+            del os.environ["PHOTOPHOENIX_RECOVER"]
+        os.environ["PHOTOPHOENIX_INCLUDE_VIDEOS"] = "false"   # older setting still respected
+        try:
+            self.assertEqual(config.load(config_path=os.path.join(TMP_BASE, "none.toml")).recover, "photos")
+        finally:
+            del os.environ["PHOTOPHOENIX_INCLUDE_VIDEOS"]
 
     def test_workers_are_capped(self):
         os.environ["PHOTOPHOENIX_WORKERS"] = "99"

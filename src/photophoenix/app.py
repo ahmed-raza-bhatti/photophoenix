@@ -4,14 +4,15 @@ Progress is saved to progress.json in the output folder; Start again with the sa
 folders to resume. Workers run at background priority and wait when RAM is low.
 All defaults come from config (config.toml / .env / PHOTOPHOENIX_* environment variables).
 """
-import csv, dataclasses, json, os, queue, threading, time
+import csv, dataclasses, json, multiprocessing, os, queue, threading, time
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-from . import __version__, config, copies, engine, safety
+from . import __version__, config, copies, engine, safety, video, video_index
 
 TITLE = "PhotoPhoenix"
+PHOTO_EXT = (".jpg.coot", ".jpeg.coot")
 GREY_EXPLAINER = """The grey area is the top part of a photo that was inside the encrypted 150 KB.
 That part of the picture can't be recovered: it is scrambled with a key only the
 attackers have.
@@ -47,6 +48,21 @@ Folders that will be searched:
 {folders}
 
 (To add more, list them under copy_search_dirs in config.toml.) Start the search?"""
+NO_REF_TIP = """{n} video(s) couldn't be rebuilt yet: their index was encrypted, and PhotoPhoenix
+has no original video from the same phone to copy the video settings from.
+
+How to fix it:
+ 1. Find an original, unedited video from the same phone model:
+     - your own: on the phone, an SD card, a backup or an old drive
+     - a friend's video from the same model, sent as a file (not via WhatsApp etc.)
+     - a phone review site's camera samples, e.g. GSMArena (search "<phone> review",
+       open the Camera page, and download a sample video from there)
+    Videos re-shared through chat apps or YouTube are re-encoded and won't work.
+ 2. Put it in a folder of its own and add that folder with "Learn cameras from…".
+ 3. Press Start again: only the failed videos are retried.
+
+PhotoPhoenix tests every reference on a short clip first and uses it only if the
+video decodes cleanly, so trying a sample can't make anything worse."""
 SAVE_EVERY = 25  # results between progress.json saves (keeps disk writes low)
 ICONS = {"ok": "✔", "review": "?", "failed": "✘"}
 
@@ -63,7 +79,7 @@ class App:
         pad = dict(padx=8, pady=4)
         top = ttk.Frame(root); top.pack(fill="x", **pad)
         self.src = tk.StringVar(value=settings.source_dir); self.out = tk.StringVar(value=settings.output_dir)
-        for r, (label, var) in enumerate((("Encrypted photos", self.src), ("Save recovered to", self.out))):
+        for r, (label, var) in enumerate((("Encrypted files", self.src), ("Save recovered to", self.out))):
             ttk.Label(top, text=label).grid(row=r, column=0, sticky="w")
             ttk.Entry(top, textvariable=var).grid(row=r, column=1, sticky="ew", padx=6)
             ttk.Button(top, text="Browse…", command=lambda v=var: self.browse(v)).grid(row=r, column=2)
@@ -83,19 +99,38 @@ class App:
         self.copies_btn = ttk.Button(bar, text="Find untouched copies", command=self.find_copies)
         self.copies_btn.pack(side="right", padx=(0, 6))
 
+        what = ttk.Frame(root); what.pack(fill="x", padx=8, pady=(4, 0))
+        ttk.Label(what, text="Recover:").pack(side="left")
+        self.recover = tk.StringVar(value=settings.recover)
+        for value, text in (("both", "Photos and videos"), ("photos", "Photos only"), ("videos", "Videos only")):
+            ttk.Radiobutton(what, text=text, value=value, variable=self.recover,
+                            command=self.update_choices).pack(side="left", padx=(8, 0))
+
         grey = ttk.Frame(root); grey.pack(fill="x", padx=8)
         ttk.Label(grey, text="Grey area (the encrypted top of each photo):").pack(side="left")
         self.grey = tk.StringVar(value=settings.grey_area)
+        self.grey_buttons = []
         for value, text in (("keep", "Keep it (shows what's missing)"), ("crop", "Crop it off"),
                             ("both", "Save both")):
-            ttk.Radiobutton(grey, text=text, value=value, variable=self.grey).pack(side="left", padx=(8, 0))
+            b = ttk.Radiobutton(grey, text=text, value=value, variable=self.grey)
+            b.pack(side="left", padx=(8, 0)); self.grey_buttons.append(b)
         ttk.Button(grey, text="?", width=2, command=self.explain_grey).pack(side="left", padx=(8, 0))
+        self.update_choices()
 
         self.progress = ttk.Progressbar(root, mode="determinate"); self.progress.pack(fill="x", **pad)
         self.status = tk.StringVar(value="Ready. Press Start.")
         ttk.Label(root, textvariable=self.status).pack(anchor="w", **pad)
         self.detail = tk.StringVar(value="")
         ttk.Label(root, textvariable=self.detail, foreground="#555").pack(anchor="w", padx=8)
+
+        work = ttk.LabelFrame(root, text="Working on"); work.pack(fill="x", padx=8, pady=(4, 0))
+        self.active = ttk.Treeview(work, columns=("step", "progress"), show="tree headings", height=4)
+        self.active.heading("#0", text="File"); self.active.heading("step", text="Step")
+        self.active.heading("progress", text="Progress")
+        self.active.column("#0", width=330); self.active.column("step", width=260)
+        self.active.column("progress", width=170, anchor="w")
+        self.active.pack(fill="x", padx=4, pady=4)
+        self.active_rows, self.progress_q = {}, None   # file -> row id; queue fed by the workers
 
         body = ttk.Frame(root); body.pack(fill="both", expand=True, **pad)
         self.log = tk.Listbox(body, activestyle="none")
@@ -119,6 +154,11 @@ class App:
         s = dataclasses.replace(self.cfg, source_dir=src)
         return s
 
+    def update_choices(self):
+        """The grey-area choice only applies to photos."""
+        state = "disabled" if self.recover.get() == "videos" else "normal"
+        for b in self.grey_buttons: b.config(state=state)
+
     def explain_grey(self):
         messagebox.showinfo(TITLE, GREY_EXPLAINER)
 
@@ -131,7 +171,7 @@ class App:
     def find_copies(self):
         src = os.path.abspath(self.src.get())
         if not os.path.isdir(src):
-            messagebox.showerror(TITLE, "Choose the encrypted photos folder first."); return
+            messagebox.showerror(TITLE, "Choose the encrypted files folder first."); return
         s = self.settings_for_run(src)
         roots = s.copy_roots()
         if not messagebox.askyesno(TITLE, COPIES_EXPLAINER.format(folders="\n".join("   " + r for r in roots))):
@@ -149,7 +189,7 @@ class App:
     def show_copies_result(self, st):
         total, found, verified = st.get("total", 0), st.get("found", 0), st.get("verified", 0)
         if not total:
-            messagebox.showinfo(TITLE, "No encrypted photos were found in the chosen folder."); return
+            messagebox.showinfo(TITLE, "No encrypted files were found in the chosen folder."); return
         if found == 0:
             msg = (f"No untouched copies found for any of the {total} encrypted files.\n\n"
                    "This is the most common result. It only means no exact copy is in the folders "
@@ -164,6 +204,8 @@ class App:
                    + (f"   {unsure} matched by name and size only (small files; very likely, not certain)\n" if unsure else "")
                    + f"\nWhen you press Start, these {found} will be restored complete from their copies. "
                    f"The other {total - found} will be repaired from the surviving data as usual.")
+        if st.get("in_list", found) > found:
+            msg += f"\n\nCopies found by earlier searches are kept: the list now holds {st['in_list']} in total."
         messagebox.showinfo(TITLE, msg)
 
     def start(self):
@@ -171,11 +213,11 @@ class App:
             messagebox.showerror(TITLE, "Choose both folders first."); return
         src, out = os.path.abspath(self.src.get()), os.path.abspath(self.out.get())
         if not os.path.isdir(src):
-            messagebox.showerror(TITLE, "The encrypted photos folder doesn't exist."); return
+            messagebox.showerror(TITLE, "The encrypted files folder doesn't exist."); return
         self.running = True; self.paused.clear(); self.stopping.clear()
         self.start_btn.config(state="disabled"); self.pause_btn.config(state="normal", text="Pause")
         self.stop_btn.config(state="normal")
-        threading.Thread(target=self.run, args=(src, out, int(self.workers.get()), self.grey.get()), daemon=True).start()
+        threading.Thread(target=self.run, args=(src, out, int(self.workers.get()), self.grey.get(), self.recover.get()), daemon=True).start()
 
     def toggle_pause(self):
         if self.paused.is_set(): self.paused.clear(); self.pause_btn.config(text="Pause")
@@ -194,37 +236,49 @@ class App:
         self.root.after(400, self.root.destroy)
 
     # ---------- background run ----------
-    def run(self, src, out, workers, grey="keep"):
+    def run(self, src, out, workers, grey="keep", recover="both"):
         ev = self.events.put
+        photos, videos = recover in ("both", "photos"), recover in ("both", "videos")
         s = self.settings_for_run(src)
         os.makedirs(out, exist_ok=True)
-        if not os.path.exists(s.library_path):
+        if photos and not os.path.exists(s.library_path):
             ev(("status", "Learning camera settings from healthy photos (first run only)…"))
             entries = engine.scan_library(s.donor_roots(), [out.lower(), s.data_dir.lower()] + [d.lower() for d in s.skip_dirs],
                                           progress=lambda n: ev(("detail", f"{n} healthy photos read…")))
             os.makedirs(s.data_dir, exist_ok=True)
             with open(s.library_path, "w", encoding="utf-8") as fh: json.dump(entries, fh)
             ev(("detail", f"Camera library: {len(entries)} camera/size types"))
+        if videos and not os.path.exists(s.video_refs_path):
+            ev(("status", "Learning video settings from healthy videos (first run only)…"))
+            added, total = video_index.update_ref_library(s.video_refs_path, s.donor_roots(),
+                                                          [out.lower(), s.data_dir.lower()] + [d.lower() for d in s.skip_dirs])
+            ev(("detail", f"Reference videos: {total} video settings types"))
         state_path = os.path.join(out, "progress.json")
         try:
             state = json.load(open(state_path, encoding="utf-8"))
         except Exception:
             state = {}
-        ev(("status", "Listing encrypted photos…"))
+        ev(("status", "Listing encrypted files…"))
         files, out_low = [], out.lower()
         skip = [d.lower() for d in s.skip_dirs] + [s.data_dir.lower()]
         for dp, dns, fs in os.walk(src):
             low = dp.lower()
             if low.startswith(out_low) or any(k in low for k in skip):
                 dns[:] = []; continue
-            files += [os.path.join(dp, f) for f in fs if f.lower().endswith((".jpg.coot", ".jpeg.coot"))]
+            exts = (PHOTO_EXT if photos else ()) + (tuple(e + ".coot" for e in video.VIDEO_EXT) if videos else ())
+            files += [os.path.join(dp, f) for f in fs if f.lower().endswith(exts)]
         files.sort()
+
+        n_refs = len(video_index.load_refs(s.video_refs_path)) if videos else 0
 
         def outdated(r):
             # repaired by an older engine with a method that has since improved, or with a
             # different grey-area choice (only photos that have a grey area are redone)
             if r.get("method") not in engine.REDO_METHODS:
                 return False
+            if r.get("kind") == "video":  # videos: retry failures after an engine update or new references
+                return r.get("status") == "failed" and (r.get("ver") != engine.ENGINE_VERSION or (
+                    "reference video" in r.get("detail", "") and r.get("refs") != n_refs))
             return r.get("ver") != engine.ENGINE_VERSION or (r.get("status") != "failed" and r.get("grey", "keep") != grey)
 
         todo = [f for f in files if os.path.relpath(f, src) not in state or outdated(state[os.path.relpath(f, src)])]
@@ -239,7 +293,10 @@ class App:
             with open(tmp, "w", encoding="utf-8") as fh: json.dump(state, fh)
             os.replace(tmp, state_path)
 
-        with ProcessPoolExecutor(workers, initializer=_init_worker, initargs=(dataclasses.asdict(s),)) as ex:
+        manager = multiprocessing.Manager()
+        self.progress_q = manager.Queue()
+        with ProcessPoolExecutor(workers, initializer=_init_worker,
+                                 initargs=(dataclasses.asdict(s), self.progress_q)) as ex:
             while True:
                 while not self.paused.is_set() and not self.stopping.is_set() and len(pending) < workers:
                     free = safety.free_ram_gb()
@@ -277,6 +334,8 @@ class App:
                             r.get("dims", ""), r.get("grey_note", ""), r.get("output", r.get("detail", "")),
                             r.get("cropped_output") or ""])
         finished_all = len(state) >= len(files)
+        self.progress_q = None
+        manager.shutdown()
         ev(("done", "Finished." if finished_all else "Stopped — press Start to resume."))
 
     # ---------- UI updates ----------
@@ -285,7 +344,38 @@ class App:
             while True: self.handle(self.events.get_nowait())
         except queue.Empty:
             pass
+        q = self.progress_q
+        try:
+            for _ in range(200):
+                if q is None: break
+                self.show_file_progress(*q.get_nowait())
+        except Exception:  # queue.Empty, or the queue closed at the end of a run
+            pass
         self.root.after(150, self.poll)
+
+    def show_file_progress(self, pid, file, step, frac):
+        """One row per file being worked on: its current step and a small text progress bar."""
+        if frac is None:
+            bar = "working…"
+        else:
+            f = min(1.0, max(0.0, frac)); n = int(f * 12)
+            bar = "▓" * n + "░" * (12 - n) + f" {f:.0%}"
+        name = os.path.basename(file)
+        row = self.active_rows.get(file)
+        if row is None:
+            # a worker handles one file at a time: a new file from it replaces its old row
+            for old_file, old_row in list(self.active_rows.items()):
+                if self.active.item(old_row, "tags") == (str(pid),):
+                    self.active.delete(old_row); del self.active_rows[old_file]
+            row = self.active.insert("", "end", text=name, values=(step, bar), tags=(str(pid),))
+            self.active_rows[file] = row
+        else:
+            self.active.item(row, values=(step, bar))
+
+    def clear_file_progress(self, file=None):
+        for f, row in list(self.active_rows.items()):
+            if file is None or f == file:
+                self.active.delete(row); del self.active_rows[f]
 
     def handle(self, e):
         kind = e[0]
@@ -300,22 +390,23 @@ class App:
         elif kind == "init":
             _, total, already, state, workers, redo = e
             self.total, self.done = total, already
-            self.counts = {"ok": 0, "review": 0, "failed": 0}; self.methods = {}
+            self.counts = {"ok": 0, "review": 0, "failed": 0}; self.methods = {}; self.need_ref = 0
             for r in state.values(): self.count(r)
             self.progress.config(maximum=max(1, total), value=already)
-            self.log.insert("end", f"{total} encrypted photos, {already} done in an earlier run, {workers} workers")
+            self.log.insert("end", f"{total} encrypted files, {already} done in an earlier run, {workers} workers")
             if redo:
-                self.log.insert("end", f"{redo} photos from an earlier run will be redone with the improved engine {engine.ENGINE_VERSION}")
+                self.log.insert("end", f"{redo} files from an earlier run will be redone (improved engine {engine.ENGINE_VERSION} or new reference videos)")
             self.update_status("")
         elif kind == "result":
             r, eta = e[1], e[2]
+            self.clear_file_progress(r.get("file"))
             self.done += 1; self.count(r); self.progress.config(value=self.done)
             extra = f"{r['method']} · {r['percent']}%" if r["status"] != "failed" else r["detail"]
             self.log.insert("end", f"{ICONS[r['status']]} {r['file']}  —  {extra}"); self.log.see("end")
             if r["status"] == "failed": self.log.itemconfig("end", fg="#b00020")
             elif r["status"] == "review": self.log.itemconfig("end", fg="#a15c00")
             if self.log.size() > 3000: self.log.delete(0, 500)
-            if "output" in r: self.show_preview(r["output"])
+            if "output" in r and r.get("kind") != "video": self.show_preview(r["output"])
             self.detail.set("")
             self.update_status(f" · about {self.fmt(eta)} left" if not self.paused.is_set() else "")
         elif kind == "pausing":
@@ -324,13 +415,18 @@ class App:
             self.update_status(" · PAUSED — press Resume")
         elif kind == "done":
             self.running = False
+            self.clear_file_progress()
             self.start_btn.config(state="normal", text="Start / Resume")
             self.pause_btn.config(state="disabled", text="Pause"); self.stop_btn.config(state="disabled")
             self.update_status(" · " + e[1]); self.log.insert("end", e[1]); self.log.see("end")
+            if getattr(self, "need_ref", 0):
+                messagebox.showinfo(TITLE, NO_REF_TIP.format(n=self.need_ref))
 
     def count(self, r):
         self.counts[r["status"]] = self.counts.get(r["status"], 0) + 1
         if r.get("method"): self.methods[r["method"]] = self.methods.get(r["method"], 0) + 1
+        if r.get("kind") == "video" and r.get("status") == "failed" and "reference video" in r.get("detail", ""):
+            self.need_ref = getattr(self, "need_ref", 0) + 1
 
     def update_status(self, suffix):
         c = self.counts
@@ -355,8 +451,8 @@ class App:
         return f"{sec // 60}m {sec % 60:02d}s" if sec >= 60 else f"{sec}s"
 
 
-def _init_worker(settings_dict):
-    from . import worker; worker.init(settings_dict)
+def _init_worker(settings_dict, progress_q=None):
+    from . import worker; worker.init(settings_dict, progress_q)
 
 
 def _work(path, src, out, prev=None, grey="keep"):

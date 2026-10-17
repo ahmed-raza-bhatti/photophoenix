@@ -3,7 +3,7 @@ import json, os, string, threading, time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-from . import engine
+from . import engine, video_index
 
 EXPLAINER = (
     "PhotoPhoenix rebuilds each encrypted photo using the JPEG settings (\"header\") of a healthy "
@@ -111,9 +111,15 @@ class LearnWindow:
         tmp = self.s.library_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh: json.dump(merged, fh)
         os.replace(tmp, self.s.library_path)
+        vadded = vtotal = 0
+        if not self.stop_flag.is_set():
+            self.win.after(0, self.status.set, "Reading healthy videos' settings…")
+            vadded, vtotal = video_index.update_ref_library(self.s.video_refs_path, roots, skip,
+                                                            self.stop_flag.is_set, engine.SYSTEM_DIR_NAMES)
         stopped = self.stop_flag.is_set()
         msg = (f"{'Stopped' if stopped else 'Done'}: read {seen[0]:,} photos' headers in {time.time() - t0:.0f}s. "
-               f"{added} new camera/size types learned; the library now has {len(merged)}.\n"
+               f"{added} new camera/size types learned; the library now has {len(merged)}. "
+               f"Videos: {vadded} new reference settings ({vtotal} in total).\n"
                + ("No new cameras: these photos come from cameras PhotoPhoenix already knew." if added == 0 else
                   "New cameras are used the next time you press Start (photos already recovered are not redone)."))
         self.win.after(0, self.finish, msg)
