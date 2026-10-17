@@ -122,7 +122,8 @@ def _work_video(path, rel, out, prev, twin):
         if os.path.exists(dest) and not twin:
             try: os.remove(dest)  # don't leave a half-written video behind
             except OSError: pass
-        return dict(file=rel, status="failed", detail=str(ex)[:100], ver=engine.ENGINE_VERSION, kind="video")
+        return dict(file=rel, status="failed", detail=str(ex)[:160], ver=engine.ENGINE_VERSION, kind="video",
+                    refs=len(_video_refs))  # retried when reference videos are added
     old = (prev or {}).get("output")
     if old and _inside(old, out) and os.path.normcase(old) != os.path.normcase(dest) and os.path.isfile(old):
         os.remove(old)

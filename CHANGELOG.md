@@ -26,6 +26,9 @@ app redoes photos recovered by an older engine.
 - "Learn cameras from…" window: add healthy-photo folders or the whole PC to the camera library
   at any time; learning adds to the existing library, can be stopped, keeps what it learned.
 - Honest explanation and result summary for "Find untouched copies".
+- When videos fail for lack of a reference video, the app explains how to get one (your own
+  original, a friend's, or a phone review site's camera sample such as GSMArena's), and those
+  videos are retried automatically once new reference videos are learned.
 ### Fixed
 - Cuts in the sound of rebuilt videos: (1) audio bytes that looked like a frame start became
   oversized fake video frames that swallowed whole audio chunks — lone frame starts now need a

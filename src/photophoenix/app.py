@@ -48,6 +48,21 @@ Folders that will be searched:
 {folders}
 
 (To add more, list them under copy_search_dirs in config.toml.) Start the search?"""
+NO_REF_TIP = """{n} video(s) couldn't be rebuilt yet: their index was encrypted, and PhotoPhoenix
+has no original video from the same phone to copy the video settings from.
+
+How to fix it:
+ 1. Find an original, unedited video from the same phone model:
+     - your own: on the phone, an SD card, a backup or an old drive
+     - a friend's video from the same model, sent as a file (not via WhatsApp etc.)
+     - a phone review site's camera samples, e.g. GSMArena (search "<phone> review",
+       open the Camera page, and download a sample video from there)
+    Videos re-shared through chat apps or YouTube are re-encoded and won't work.
+ 2. Put it in a folder of its own and add that folder with "Learn cameras from…".
+ 3. Press Start again: only the failed videos are retried.
+
+PhotoPhoenix tests every reference on a short clip first and uses it only if the
+video decodes cleanly, so trying a sample can't make anything worse."""
 SAVE_EVERY = 25  # results between progress.json saves (keeps disk writes low)
 ICONS = {"ok": "✔", "review": "?", "failed": "✘"}
 
@@ -254,13 +269,16 @@ class App:
             files += [os.path.join(dp, f) for f in fs if f.lower().endswith(exts)]
         files.sort()
 
+        n_refs = len(video_index.load_refs(s.video_refs_path)) if videos else 0
+
         def outdated(r):
             # repaired by an older engine with a method that has since improved, or with a
             # different grey-area choice (only photos that have a grey area are redone)
             if r.get("method") not in engine.REDO_METHODS:
                 return False
-            if r.get("kind") == "video":  # videos: only retry failures after an engine update
-                return r.get("status") == "failed" and r.get("ver") != engine.ENGINE_VERSION
+            if r.get("kind") == "video":  # videos: retry failures after an engine update or new references
+                return r.get("status") == "failed" and (r.get("ver") != engine.ENGINE_VERSION or (
+                    "reference video" in r.get("detail", "") and r.get("refs") != n_refs))
             return r.get("ver") != engine.ENGINE_VERSION or (r.get("status") != "failed" and r.get("grey", "keep") != grey)
 
         todo = [f for f in files if os.path.relpath(f, src) not in state or outdated(state[os.path.relpath(f, src)])]
@@ -372,12 +390,12 @@ class App:
         elif kind == "init":
             _, total, already, state, workers, redo = e
             self.total, self.done = total, already
-            self.counts = {"ok": 0, "review": 0, "failed": 0}; self.methods = {}
+            self.counts = {"ok": 0, "review": 0, "failed": 0}; self.methods = {}; self.need_ref = 0
             for r in state.values(): self.count(r)
             self.progress.config(maximum=max(1, total), value=already)
             self.log.insert("end", f"{total} encrypted files, {already} done in an earlier run, {workers} workers")
             if redo:
-                self.log.insert("end", f"{redo} photos from an earlier run will be redone with the improved engine {engine.ENGINE_VERSION}")
+                self.log.insert("end", f"{redo} files from an earlier run will be redone (improved engine {engine.ENGINE_VERSION} or new reference videos)")
             self.update_status("")
         elif kind == "result":
             r, eta = e[1], e[2]
@@ -401,10 +419,14 @@ class App:
             self.start_btn.config(state="normal", text="Start / Resume")
             self.pause_btn.config(state="disabled", text="Pause"); self.stop_btn.config(state="disabled")
             self.update_status(" · " + e[1]); self.log.insert("end", e[1]); self.log.see("end")
+            if getattr(self, "need_ref", 0):
+                messagebox.showinfo(TITLE, NO_REF_TIP.format(n=self.need_ref))
 
     def count(self, r):
         self.counts[r["status"]] = self.counts.get(r["status"], 0) + 1
         if r.get("method"): self.methods[r["method"]] = self.methods.get(r["method"], 0) + 1
+        if r.get("kind") == "video" and r.get("status") == "failed" and "reference video" in r.get("detail", ""):
+            self.need_ref = getattr(self, "need_ref", 0) + 1
 
     def update_status(self, suffix):
         c = self.counts

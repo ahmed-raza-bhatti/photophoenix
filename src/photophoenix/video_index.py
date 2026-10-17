@@ -517,8 +517,8 @@ def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries
     size = os.path.getsize(path); olen = size - TRAILER
     refs = [r for r in refs if r]
     if not refs:
-        raise ValueError("index was encrypted and no healthy reference video from the same phone is known "
-                         "(add folders with healthy videos via 'Learn cameras from…')")
+        raise ValueError("no reference video from this phone yet: add an original video from the same phone "
+                         "model via 'Learn cameras from…'")
     with open(path, "rb") as fh:
         mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
         try:
@@ -555,8 +555,8 @@ def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries
                 elif ref is not None and rate <= REVIEW_ERROR_RATE and (runner_up is None or runner_up >= 5 * rate):
                     status = "review"   # clearly the right camera, but a few frames may glitch
                 else:
-                    raise ValueError("index was encrypted and none of the known reference videos matches this "
-                                     "video's settings (add healthy videos from the same phone)")
+                    raise ValueError("no reference video matches this phone: add an original video from the same "
+                                     "phone model via 'Learn cameras from…'")
             elif len(cands) == 1:
                 ref, rate, status = cands[0], None, "review"  # can't verify without ffmpeg
             else:

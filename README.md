@@ -93,9 +93,29 @@ back depends on where the video's **index** (the table of where every frame is) 
 On one real 250 GB drive, 196 of 440 encrypted videos had their index at the end. Of the rest,
 a sample rebuilt only where a healthy video from the same phone existed (e.g. 45 s and 141 s
 1080p videos); the healthy "reference" from one phone turned out to be broken itself, so its
-videos couldn't be rebuilt. Rebuilt videos had sound with no audio decode errors. Untouched
+videos couldn't be rebuilt — until a camera sample from a phone review site was used instead
+(see below). Rebuilt videos had sound with no audio decode errors. Untouched
 copies (see below) are restored complete for any video. Choose what to recover in the app
 (**Recover: Photos and videos / Photos only / Videos only**) or with `recover = "photos"`.
+
+### No healthy video from that phone? Borrow one
+
+A rebuilt video only needs the *settings* of another video from the same phone model, not its
+content. If you have none, someone else's original works just as well:
+
+1. Find an **original, unedited** video from the same phone model: your own on the phone, an SD
+   card or a backup; a friend's (sent as a file); or a **phone review site's camera samples**.
+   [GSMArena](https://www.gsmarena.com) reviews link the phone's own sample videos on the
+   review's Camera page (download the file itself, not a YouTube version).
+2. Put it in a folder of its own and add that folder with **Learn cameras from…**.
+3. Press **Start** again. Videos that failed for lack of a reference are retried.
+
+Videos shared through chat apps, social media or YouTube are re-encoded and won't work. Every
+reference is tested on a short clip first and used only if the video decodes cleanly, so a
+wrong sample can't make anything worse. Example: no healthy Nokia 5 video existed on the drive
+above; GSMArena's 2017 Nokia 5 review sample rebuilt three 2019 Nokia 5 videos (2–7 minutes,
+1080p, with sound, 0.2–2.3% of frames glitchy). The app shows these steps when it finishes a
+run with such videos.
 
 ## Teaching PhotoPhoenix your cameras
 
