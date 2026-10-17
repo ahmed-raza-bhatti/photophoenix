@@ -27,6 +27,11 @@ app redoes photos recovered by an older engine.
   at any time; learning adds to the existing library, can be stopped, keeps what it learned.
 - Honest explanation and result summary for "Find untouched copies".
 ### Fixed
+- Cuts in the sound of rebuilt videos: (1) audio bytes that looked like a frame start became
+  oversized fake video frames that swallowed whole audio chunks — lone frame starts now need a
+  plausible size and a clean ending (another NAL or real AAC); (2) every AAC frame was given the
+  reference's first (odd) duration, so players inserted a gap after each frame — AAC frames are now
+  always 1024 (or 960) samples, and video uses the reference's most common frame duration.
 - "Find untouched copies" replaced the whole copy list, so searching a second folder wiped the
   copies found earlier. Searches now add to the list (entries whose files are gone are dropped).
 ### Changed

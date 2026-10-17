@@ -52,7 +52,7 @@ def ref_from_moov(moov, path=""):
         stts = _child(moov, stbl[0], stbl[1], [b"stts"])
         if not stsd or not stts or b"avcC" not in stsd: return None
         i = stsd.find(b"avcC")
-        delta = struct.unpack(">I", moov[stts[0] + 12:stts[0] + 16])[0]
+        delta = _typical_delta(moov, stts)
         w = struct.unpack(">I", moov[tkhd[1] - 8:tkhd[1] - 4])[0] >> 16
         h = struct.unpack(">I", moov[tkhd[1] - 4:tkhd[1]])[0] >> 16
         return dict(stsd=stsd.hex(), nal_len=(stsd[i + 8] & 3) + 1, ts=ts, delta=delta, w=w, h=h, path=path,
@@ -83,9 +83,32 @@ def audio_from_moov(moov):
         if len(asc) < 2 or (asc[0] >> 3) != 2: return None  # AAC-LC only
         v = moov[mdhd[0]]
         ts = struct.unpack(">I", moov[mdhd[0] + (20 if v else 12):mdhd[0] + (24 if v else 16)])[0]
-        delta = struct.unpack(">I", moov[stts[0] + 12:stts[0] + 16])[0]
-        return dict(stsd=stsd.hex(), asc=asc.hex(), ts=ts, delta=delta)
+        return dict(stsd=stsd.hex(), asc=asc.hex(), ts=ts, delta=aac_frame_delta(asc.hex(), ts))
     return None
+
+
+AAC_RATES = (96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350)
+
+
+def aac_frame_delta(asc_hex, ts):
+    """Duration of one AAC frame in timescale units: always 1024 samples (960 if the config's
+    frameLengthFlag is set). Never taken from the reference's index, whose first entry can be odd
+    (e.g. 1105), which made players insert a gap after every frame (choppy sound)."""
+    asc = bytes.fromhex(asc_hex)
+    sfi = ((asc[0] & 7) << 1) | (asc[1] >> 7)
+    rate = AAC_RATES[sfi] if sfi < len(AAC_RATES) else ts
+    samples = 960 if (asc[1] >> 2) & 1 else 1024
+    return max(1, round(samples * ts / rate))
+
+
+def _typical_delta(moov, stts):
+    """Most common sample duration in an stts box (the first entry can be an odd one)."""
+    n = struct.unpack(">I", moov[stts[0] + 4:stts[0] + 8])[0]
+    best = (0, 0)
+    for k in range(min(n, 4096)):
+        cnt, d = struct.unpack(">II", moov[stts[0] + 8 + 8 * k:stts[0] + 16 + 8 * k])
+        if cnt > best[0]: best = (cnt, d)
+    return best[1] or 1
 
 
 def _read_moov(path):
@@ -165,8 +188,10 @@ def find_media_start(mm, olen):
     return ENC_END
 
 
-def walk_frames(mm, start, end, nal_len=4, progress=None):
-    """[(offset, size, keyframe)] of H.264 access units between start and end; audio is skipped."""
+def walk_frames(mm, start, end, nal_len=4, progress=None, end_ok=None):
+    """[(offset, size, keyframe)] of H.264 access units between start and end; audio is skipped.
+    end_ok(pos): optional check that real (non-video) data such as an AAC frame starts at pos; used
+    to confirm a lone frame start really ends where audio begins."""
     fmt = {4: ">I", 2: ">H", 1: ">B"}[nal_len]
 
     def nal_at(p):
@@ -191,12 +216,20 @@ def walk_frames(mm, start, end, nal_len=4, progress=None):
         if z > 7 or i + 2 * z + 1 > len(bits): return None, i
         return (1 << z) - 1 + (int(bits[i + z + 1:i + 2 * z + 1], 2) if z else 0), i + 2 * z + 1
 
+    sizes = []                            # recent confirmed frame sizes (typical size)
+
     def strong_slice(p):
-        """A lone frame start (muxers that interleave audio after every frame): first slice of a
-        picture whose header parses to a valid slice type and a small PPS id."""
+        """A lone frame start (no chain of NALs to confirm it): first slice of a picture with a valid
+        header, a plausible size, and a clean ending (another NAL, audio, or the end). Audio bytes that
+        merely look like a frame start fail these: they have random lengths and end mid-data."""
         r = nal_at(p)
         if not r or r[1] not in (1, 5) or not r[2] & 0x80 or not (16 <= r[0] <= SOLO_MAX): return False
-        return header_ok(p, r[1])
+        if not header_ok(p, r[1]): return False
+        if len(sizes) >= 8:
+            typical = sorted(sizes[-64:])[len(sizes[-64:]) // 2]
+            if r[0] > typical * (8 if r[1] == 5 else 4): return False
+        e = p + nal_len + r[0]
+        return e >= end - 16 or nal_at(e) is not None or bool(end_ok and end_ok(e))
 
     def header_ok(p, t):
         """Slice header of a picture's first slice: valid slice type and PPS id 0 (what cameras use).
@@ -217,7 +250,7 @@ def walk_frames(mm, start, end, nal_len=4, progress=None):
         if progress and steps % 4096 == 0: progress((pos - start) / span)
         r = nal_at(pos)
         if r is None or (cur is None and not start_ok(pos)):
-            if cur: frames.append(cur); cur = None
+            if cur: frames.append(cur); sizes.append(cur[1]); cur = None
             q = pos + 1
             while q < end - 16 and not start_ok(q):
                 q += 1
@@ -230,7 +263,7 @@ def walk_frames(mm, start, end, nal_len=4, progress=None):
             pos += 1
             continue
         if t in (1, 5) and b1 & 0x80:            # first slice of a new picture (first_mb_in_slice == 0)
-            if cur and cur[3]: frames.append(cur); cur = None
+            if cur and cur[3]: frames.append(cur); sizes.append(cur[1]); cur = None
             if cur is None: cur = [pos, 0, False, False]
         elif t in (6, 7, 8, 9):                 # SEI / SPS / PPS / AUD begin a new access unit
             if cur and cur[3]: frames.append(cur); cur = None
@@ -324,11 +357,37 @@ def video_deltas(frames, gaps, afr, ref, audio, anchor_every=1.0):
     return out
 
 
+def aac_checker(asc):
+    """end_ok for walk_frames: does a clean AAC frame start at pos? (needs PyAV)"""
+    try:
+        import av
+    except ImportError:
+        return None
+    adts, ch = _adts_maker(asc)
+    biggest = 768 * ch + 64
+
+    def ok(mm, pos):
+        ctx = av.CodecContext.create("aac", "r")
+        try:
+            ctx.decode(av.Packet(adts(mm[pos:pos + biggest]))); return True
+        except av.error.FFmpegError:
+            return False
+    return ok
+
+
+_AUDIO_CACHE = {}
+
+
 def audio_settings(ref):
     a = ref.get("audio")
-    if a is None and ref.get("path") and os.path.exists(ref["path"]):  # library made before sound support
-        moov = _read_moov(ref["path"])
-        a = audio_from_moov(moov) if moov else None
+    if a is None and ref.get("path"):                # library made before sound support: read once
+        p = ref["path"]
+        if p not in _AUDIO_CACHE:
+            moov = _read_moov(p) if os.path.exists(p) else None
+            _AUDIO_CACHE[p] = audio_from_moov(moov) if moov else None
+        a = _AUDIO_CACHE[p]
+    if a:  # libraries saved before this fix stored the reference's first (possibly odd) duration
+        a = dict(a, delta=aac_frame_delta(a["asc"], a["ts"]))
     return a
 
 
@@ -468,9 +527,14 @@ def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries
             start = find_media_start(mm, olen)
             by_len = {}
             for r in refs: by_len.setdefault(r["nal_len"], []).append(r)
+            # a lone frame start must end where audio begins: check against each audio format the
+            # candidate references use (phones use only a few)
+            ascs = {a["asc"] for a in (audio_settings(r) for r in refs) if a}
+            checkers = [c for c in (aac_checker(bytes.fromhex(x)) for x in ascs) if c]
+            end_ok = (lambda pos: any(c(mm, pos) for c in checkers)) if checkers else None
             frames, cands = [], []
             for nal_len, rs in by_len.items():
-                fr = walk_frames(mm, start, olen, nal_len, lambda f: say("finding video frames", f))
+                fr = walk_frames(mm, start, olen, nal_len, lambda f: say("finding video frames", f), end_ok)
                 if len(fr) > len(frames): frames, cands = fr, rs
             # frames before the first surviving keyframe depend on an encrypted one: drop them
             k0 = next((i for i, f in enumerate(frames) if f[2]), None)

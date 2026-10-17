@@ -37,6 +37,31 @@ class WalkFramesTests(unittest.TestCase):
         self.assertEqual(frames, expected)
 
 
+class TimingAndFakeFrameTests(unittest.TestCase):
+    def test_aac_frame_duration_comes_from_the_format(self):
+        self.assertEqual(video_index.aac_frame_delta("1190", 48000), 1024)   # 48 kHz stereo
+        self.assertEqual(video_index.aac_frame_delta("1210", 44100), 1024)   # 44.1 kHz stereo
+        self.assertEqual(video_index.aac_frame_delta("1190", 90000), 1920)   # other timescale
+
+    def test_typical_duration_ignores_an_odd_first_entry(self):
+        stts = struct.pack(">I4sII", 32, b"stts", 0, 3) + struct.pack(">IIIIII", 1, 1105, 500, 1024, 1, 900)
+        self.assertEqual(video_index._typical_delta(stts, (8, len(stts))), 1024)
+
+    def test_fake_oversized_frame_in_audio_is_rejected(self):
+        rnd = random.Random(7)
+        data = bytearray()
+        for i in range(40):                                   # normal chained P frames (~1 KB)
+            data += nal(0x41, 0x9A, 900 + i) + nal(0x41, 0x1A, 100)
+            if i == 20:                                       # audio chunk with a fake frame start inside
+                junk = bytearray(rnd.getrandbits(8) for _ in range(3000)); junk[0] = 0xFF
+                fake = struct.pack(">I", 200_000) + bytes([0x41, 0x9A]) + bytes(20)   # claims 200 KB
+                data += junk + fake + junk
+        data += b"\0" * 32
+        frames = video_index.walk_frames(bytes(data), 0, len(data) - 32)
+        self.assertLess(max(s for _, s, _ in frames), 5000)   # no frame swallowed audio + video
+        self.assertGreaterEqual(len(frames), 39)
+
+
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not installed")
 class RebuildTests(unittest.TestCase):
     def setUp(self):
