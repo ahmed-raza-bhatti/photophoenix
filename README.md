@@ -94,8 +94,8 @@ On one real 250 GB drive, 196 of 440 encrypted videos had their index at the end
 a sample rebuilt only where a healthy video from the same phone existed (e.g. 45 s and 141 s
 1080p videos); the healthy "reference" from one phone turned out to be broken itself, so its
 videos couldn't be rebuilt. Rebuilt videos had sound with no audio decode errors. Untouched
-copies (see below) are restored complete for any video. Turn videos off with the
-**Include videos** box or `include_videos = false`.
+copies (see below) are restored complete for any video. Choose what to recover in the app
+(**Recover: Photos and videos / Photos only / Videos only**) or with `recover = "photos"`.
 
 ## Teaching PhotoPhoenix your cameras
 

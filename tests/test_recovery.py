@@ -180,6 +180,18 @@ class ConfigTests(unittest.TestCase):
         finally:
             del os.environ["PHOTOPHOENIX_WORKERS"], os.environ["PHOTOPHOENIX_DONOR_DIRS"]
 
+    def test_recover_choice_and_old_setting(self):
+        os.environ["PHOTOPHOENIX_RECOVER"] = "videos"
+        try:
+            self.assertEqual(config.load(config_path=os.path.join(TMP_BASE, "none.toml")).recover, "videos")
+        finally:
+            del os.environ["PHOTOPHOENIX_RECOVER"]
+        os.environ["PHOTOPHOENIX_INCLUDE_VIDEOS"] = "false"   # older setting still respected
+        try:
+            self.assertEqual(config.load(config_path=os.path.join(TMP_BASE, "none.toml")).recover, "photos")
+        finally:
+            del os.environ["PHOTOPHOENIX_INCLUDE_VIDEOS"]
+
     def test_workers_are_capped(self):
         os.environ["PHOTOPHOENIX_WORKERS"] = "99"
         try:

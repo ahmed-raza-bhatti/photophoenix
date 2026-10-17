@@ -6,6 +6,8 @@ app redoes photos recovered by an older engine.
 
 ## [Unreleased]
 ### Added
+- "Recover: Photos and videos / Photos only / Videos only" choice in the app (`recover` setting;
+  replaces the "Include videos" box; old `include_videos = false` still means photos only).
 - Videos whose index was encrypted: the H.264 frames are found in the surviving data and a new
   index is written using a healthy reference video's codec settings (picture only, no sound).
   The reference is chosen by test-decoding with ffmpeg; "review" when a few frames may glitch.

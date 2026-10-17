@@ -84,15 +84,23 @@ class App:
         self.copies_btn = ttk.Button(bar, text="Find untouched copies", command=self.find_copies)
         self.copies_btn.pack(side="right", padx=(0, 6))
 
+        what = ttk.Frame(root); what.pack(fill="x", padx=8, pady=(4, 0))
+        ttk.Label(what, text="Recover:").pack(side="left")
+        self.recover = tk.StringVar(value=settings.recover)
+        for value, text in (("both", "Photos and videos"), ("photos", "Photos only"), ("videos", "Videos only")):
+            ttk.Radiobutton(what, text=text, value=value, variable=self.recover,
+                            command=self.update_choices).pack(side="left", padx=(8, 0))
+
         grey = ttk.Frame(root); grey.pack(fill="x", padx=8)
         ttk.Label(grey, text="Grey area (the encrypted top of each photo):").pack(side="left")
         self.grey = tk.StringVar(value=settings.grey_area)
+        self.grey_buttons = []
         for value, text in (("keep", "Keep it (shows what's missing)"), ("crop", "Crop it off"),
                             ("both", "Save both")):
-            ttk.Radiobutton(grey, text=text, value=value, variable=self.grey).pack(side="left", padx=(8, 0))
+            b = ttk.Radiobutton(grey, text=text, value=value, variable=self.grey)
+            b.pack(side="left", padx=(8, 0)); self.grey_buttons.append(b)
         ttk.Button(grey, text="?", width=2, command=self.explain_grey).pack(side="left", padx=(8, 0))
-        self.videos = tk.BooleanVar(value=settings.include_videos)
-        ttk.Checkbutton(grey, text="Include videos", variable=self.videos).pack(side="right")
+        self.update_choices()
 
         self.progress = ttk.Progressbar(root, mode="determinate"); self.progress.pack(fill="x", **pad)
         self.status = tk.StringVar(value="Ready. Press Start.")
@@ -121,6 +129,11 @@ class App:
     def settings_for_run(self, src):
         s = dataclasses.replace(self.cfg, source_dir=src)
         return s
+
+    def update_choices(self):
+        """The grey-area choice only applies to photos."""
+        state = "disabled" if self.recover.get() == "videos" else "normal"
+        for b in self.grey_buttons: b.config(state=state)
 
     def explain_grey(self):
         messagebox.showinfo(TITLE, GREY_EXPLAINER)
@@ -180,7 +193,7 @@ class App:
         self.running = True; self.paused.clear(); self.stopping.clear()
         self.start_btn.config(state="disabled"); self.pause_btn.config(state="normal", text="Pause")
         self.stop_btn.config(state="normal")
-        threading.Thread(target=self.run, args=(src, out, int(self.workers.get()), self.grey.get(), self.videos.get()), daemon=True).start()
+        threading.Thread(target=self.run, args=(src, out, int(self.workers.get()), self.grey.get(), self.recover.get()), daemon=True).start()
 
     def toggle_pause(self):
         if self.paused.is_set(): self.paused.clear(); self.pause_btn.config(text="Pause")
@@ -199,11 +212,12 @@ class App:
         self.root.after(400, self.root.destroy)
 
     # ---------- background run ----------
-    def run(self, src, out, workers, grey="keep", videos=True):
+    def run(self, src, out, workers, grey="keep", recover="both"):
         ev = self.events.put
+        photos, videos = recover in ("both", "photos"), recover in ("both", "videos")
         s = self.settings_for_run(src)
         os.makedirs(out, exist_ok=True)
-        if not os.path.exists(s.library_path):
+        if photos and not os.path.exists(s.library_path):
             ev(("status", "Learning camera settings from healthy photos (first run only)…"))
             entries = engine.scan_library(s.donor_roots(), [out.lower(), s.data_dir.lower()] + [d.lower() for d in s.skip_dirs],
                                           progress=lambda n: ev(("detail", f"{n} healthy photos read…")))
@@ -227,7 +241,7 @@ class App:
             low = dp.lower()
             if low.startswith(out_low) or any(k in low for k in skip):
                 dns[:] = []; continue
-            exts = PHOTO_EXT + (tuple(e + ".coot" for e in video.VIDEO_EXT) if videos else ())
+            exts = (PHOTO_EXT if photos else ()) + (tuple(e + ".coot" for e in video.VIDEO_EXT) if videos else ())
             files += [os.path.join(dp, f) for f in fs if f.lower().endswith(exts)]
         files.sort()
 

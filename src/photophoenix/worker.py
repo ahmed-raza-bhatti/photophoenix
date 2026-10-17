@@ -15,8 +15,11 @@ def init(settings_dict):
     if _settings.low_priority:
         safety.low_priority(background=True)
     safety.use_temp_dir(_settings.temp_dir)
-    with open(_settings.library_path, encoding="utf-8") as fh:
-        _lib = engine.Library(json.load(fh))
+    try:
+        with open(_settings.library_path, encoding="utf-8") as fh:
+            _lib = engine.Library(json.load(fh))
+    except FileNotFoundError:  # "videos only": no camera library needed
+        _lib = engine.Library([])
     _copies = copies.load(_settings.copies_path, _settings.copy_roots())
 
 
