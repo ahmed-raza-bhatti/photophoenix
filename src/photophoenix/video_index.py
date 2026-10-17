@@ -165,7 +165,7 @@ def find_media_start(mm, olen):
     return ENC_END
 
 
-def walk_frames(mm, start, end, nal_len=4):
+def walk_frames(mm, start, end, nal_len=4, progress=None):
     """[(offset, size, keyframe)] of H.264 access units between start and end; audio is skipped."""
     fmt = {4: ">I", 2: ">H", 1: ">B"}[nal_len]
 
@@ -211,14 +211,17 @@ def walk_frames(mm, start, end, nal_len=4):
     def start_ok(p):
         return chain_ok(p) or strong_slice(p)
 
-    frames, cur, pos = [], None, start   # cur = [offset, size, keyframe, has_slice]
+    frames, cur, pos, steps, span = [], None, start, 0, max(1, end - start)
     while pos < end:
+        steps += 1
+        if progress and steps % 4096 == 0: progress((pos - start) / span)
         r = nal_at(pos)
         if r is None or (cur is None and not start_ok(pos)):
             if cur: frames.append(cur); cur = None
             q = pos + 1
             while q < end - 16 and not start_ok(q):
                 q += 1
+                if progress and q % 262144 == 0: progress((q - start) / span)
             pos = q if q < end - 16 else end
             continue
         n, t, b1 = r
@@ -252,7 +255,7 @@ def _adts_maker(asc):
     return adts, max(1, ch)
 
 
-def split_aac(mm, gaps, asc):
+def split_aac(mm, gaps, asc, progress=None):
     """Exact AAC frames inside the gaps between video frames: [(offset, size)]. Needs PyAV."""
     try:
         import av
@@ -269,7 +272,8 @@ def split_aac(mm, gaps, asc):
             return False
 
     out = []
-    for a, b in gaps:
+    for gi, (a, b) in enumerate(gaps):
+        if progress and gi % 20 == 0: progress(gi / max(1, len(gaps)))
         pos = a
         while pos < b:
             hi = min(b - pos, biggest)
@@ -391,7 +395,7 @@ def build_moov(ref, frames, base, audio=None, afr=None, deltas=None):
 FTYP = struct.pack(">I4s4sI", 24, b"ftyp", b"isom", 512) + b"isomavc1"
 
 
-def write_video(dest, mm, frames, ref, media_from, media_to, audio=None, afr=None, deltas=None):
+def write_video(dest, mm, frames, ref, media_from, media_to, audio=None, afr=None, deltas=None, progress=None):
     """ftyp + 64-bit mdat holding mm[media_from:media_to] + moov. Streams; returns nothing."""
     base = len(FTYP) + 16 - media_from
     with open(dest, "wb") as w:
@@ -400,6 +404,7 @@ def write_video(dest, mm, frames, ref, media_from, media_to, audio=None, afr=Non
         p = media_from
         while p < media_to:
             q = min(media_to, p + (8 << 20)); w.write(mm[p:q]); p = q
+            if progress: progress((p - media_from) / max(1, media_to - media_from))
         w.write(build_moov(ref, frames, base, audio, afr, deltas))
 
 
@@ -420,13 +425,14 @@ def likely_order(refs, path):
     return sorted(refs, key=score)
 
 
-def pick_reference(mm, frames, refs, ffmpeg, temp_dir):
+def pick_reference(mm, frames, refs, ffmpeg, temp_dir, progress=None):
     """Try each reference on a short clip; return (ref, errors_per_frame) of the best, or (None, None).
     `frames` must start at a keyframe (otherwise every reference shows errors)."""
     clip = frames[:TEST_SAMPLES]
     lo, hi = clip[0][0], clip[-1][0] + clip[-1][1]
     scored = []
-    for ref in refs:
+    for i, ref in enumerate(refs):
+        if progress: progress(i, len(refs))
         fd, tmp = tempfile.mkstemp(suffix=".mp4", dir=temp_dir); os.close(fd)
         try:
             write_video(tmp, mm, clip, ref, lo, hi)
@@ -442,10 +448,12 @@ def pick_reference(mm, frames, refs, ffmpeg, temp_dir):
     return scored[0][1], scored[0][0], (scored[1][0] if len(scored) > 1 else None)
 
 
-def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries=None):
+def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries=None, progress=None):
     """Rebuild a video whose index was encrypted. Returns an info dict; raises ValueError if it can't.
     prefer: a reference to try first (e.g. the one that worked for the folder); max_tries: limit the
-    references tried (used after earlier videos in the same folder found no match)."""
+    references tried (used after earlier videos in the same folder found no match).
+    progress(step, fraction): optional callback for the app's per-file progress."""
+    say = progress or (lambda step, frac=None: None)
     ffmpeg = ffmpeg or shutil.which("ffmpeg")
     size = os.path.getsize(path); olen = size - TRAILER
     refs = [r for r in refs if r]
@@ -462,7 +470,7 @@ def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries
             for r in refs: by_len.setdefault(r["nal_len"], []).append(r)
             frames, cands = [], []
             for nal_len, rs in by_len.items():
-                fr = walk_frames(mm, start, olen, nal_len)
+                fr = walk_frames(mm, start, olen, nal_len, lambda f: say("finding video frames", f))
                 if len(fr) > len(frames): frames, cands = fr, rs
             # frames before the first surviving keyframe depend on an encrypted one: drop them
             k0 = next((i for i, f in enumerate(frames) if f[2]), None)
@@ -475,7 +483,9 @@ def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries
             if max_tries:
                 cands = cands[:max_tries]
             if ffmpeg:
-                ref, rate, runner_up = pick_reference(mm, frames, cands, ffmpeg, temp_dir or tempfile.gettempdir())
+                ref, rate, runner_up = pick_reference(
+                    mm, frames, cands, ffmpeg, temp_dir or tempfile.gettempdir(),
+                    lambda i, n: say(f"choosing reference video ({i + 1}/{n})", i / max(1, n)))
                 if ref is not None and rate <= MAX_ERROR_RATE:
                     status = "ok"
                 elif ref is not None and rate <= REVIEW_ERROR_RATE and (runner_up is None or runner_up >= 5 * rate):
@@ -494,10 +504,11 @@ def rebuild(path, dest, refs, temp_dir=None, ffmpeg=None, prefer=None, max_tries
                         if frames[i + 1][0] > frames[i][0] + frames[i][1]]
                 last_end = frames[-1][0] + frames[-1][1]
                 if olen > last_end: gaps.append((last_end, olen))
-                afr = split_aac(mm, gaps, bytes.fromhex(audio["asc"]))
+                afr = split_aac(mm, gaps, bytes.fromhex(audio["asc"]), lambda f: say("measuring sound", f))
                 deltas = video_deltas(frames, gaps, afr, ref, audio)
             media_to = max(frames[-1][0] + frames[-1][1], (afr[-1][0] + afr[-1][1]) if afr else 0)
-            write_video(dest, mm, frames, ref, frames[0][0], media_to, audio, afr, deltas)
+            write_video(dest, mm, frames, ref, frames[0][0], media_to, audio, afr, deltas,
+                        lambda f: say("writing video", f))
         finally:
             mm.close()
     seconds = (sum(deltas) if deltas else len(frames) * ref["delta"]) / ref["ts"]

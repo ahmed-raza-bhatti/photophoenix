@@ -4,7 +4,7 @@ Progress is saved to progress.json in the output folder; Start again with the sa
 folders to resume. Workers run at background priority and wait when RAM is low.
 All defaults come from config (config.toml / .env / PHOTOPHOENIX_* environment variables).
 """
-import csv, dataclasses, json, os, queue, threading, time
+import csv, dataclasses, json, multiprocessing, os, queue, threading, time
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -107,6 +107,15 @@ class App:
         ttk.Label(root, textvariable=self.status).pack(anchor="w", **pad)
         self.detail = tk.StringVar(value="")
         ttk.Label(root, textvariable=self.detail, foreground="#555").pack(anchor="w", padx=8)
+
+        work = ttk.LabelFrame(root, text="Working on"); work.pack(fill="x", padx=8, pady=(4, 0))
+        self.active = ttk.Treeview(work, columns=("step", "progress"), show="tree headings", height=4)
+        self.active.heading("#0", text="File"); self.active.heading("step", text="Step")
+        self.active.heading("progress", text="Progress")
+        self.active.column("#0", width=330); self.active.column("step", width=260)
+        self.active.column("progress", width=170, anchor="w")
+        self.active.pack(fill="x", padx=4, pady=4)
+        self.active_rows, self.progress_q = {}, None   # file -> row id; queue fed by the workers
 
         body = ttk.Frame(root); body.pack(fill="both", expand=True, **pad)
         self.log = tk.Listbox(body, activestyle="none")
@@ -266,7 +275,10 @@ class App:
             with open(tmp, "w", encoding="utf-8") as fh: json.dump(state, fh)
             os.replace(tmp, state_path)
 
-        with ProcessPoolExecutor(workers, initializer=_init_worker, initargs=(dataclasses.asdict(s),)) as ex:
+        manager = multiprocessing.Manager()
+        self.progress_q = manager.Queue()
+        with ProcessPoolExecutor(workers, initializer=_init_worker,
+                                 initargs=(dataclasses.asdict(s), self.progress_q)) as ex:
             while True:
                 while not self.paused.is_set() and not self.stopping.is_set() and len(pending) < workers:
                     free = safety.free_ram_gb()
@@ -304,6 +316,8 @@ class App:
                             r.get("dims", ""), r.get("grey_note", ""), r.get("output", r.get("detail", "")),
                             r.get("cropped_output") or ""])
         finished_all = len(state) >= len(files)
+        self.progress_q = None
+        manager.shutdown()
         ev(("done", "Finished." if finished_all else "Stopped — press Start to resume."))
 
     # ---------- UI updates ----------
@@ -312,7 +326,38 @@ class App:
             while True: self.handle(self.events.get_nowait())
         except queue.Empty:
             pass
+        q = self.progress_q
+        try:
+            for _ in range(200):
+                if q is None: break
+                self.show_file_progress(*q.get_nowait())
+        except Exception:  # queue.Empty, or the queue closed at the end of a run
+            pass
         self.root.after(150, self.poll)
+
+    def show_file_progress(self, pid, file, step, frac):
+        """One row per file being worked on: its current step and a small text progress bar."""
+        if frac is None:
+            bar = "working…"
+        else:
+            f = min(1.0, max(0.0, frac)); n = int(f * 12)
+            bar = "▓" * n + "░" * (12 - n) + f" {f:.0%}"
+        name = os.path.basename(file)
+        row = self.active_rows.get(file)
+        if row is None:
+            # a worker handles one file at a time: a new file from it replaces its old row
+            for old_file, old_row in list(self.active_rows.items()):
+                if self.active.item(old_row, "tags") == (str(pid),):
+                    self.active.delete(old_row); del self.active_rows[old_file]
+            row = self.active.insert("", "end", text=name, values=(step, bar), tags=(str(pid),))
+            self.active_rows[file] = row
+        else:
+            self.active.item(row, values=(step, bar))
+
+    def clear_file_progress(self, file=None):
+        for f, row in list(self.active_rows.items()):
+            if file is None or f == file:
+                self.active.delete(row); del self.active_rows[f]
 
     def handle(self, e):
         kind = e[0]
@@ -336,6 +381,7 @@ class App:
             self.update_status("")
         elif kind == "result":
             r, eta = e[1], e[2]
+            self.clear_file_progress(r.get("file"))
             self.done += 1; self.count(r); self.progress.config(value=self.done)
             extra = f"{r['method']} · {r['percent']}%" if r["status"] != "failed" else r["detail"]
             self.log.insert("end", f"{ICONS[r['status']]} {r['file']}  —  {extra}"); self.log.see("end")
@@ -351,6 +397,7 @@ class App:
             self.update_status(" · PAUSED — press Resume")
         elif kind == "done":
             self.running = False
+            self.clear_file_progress()
             self.start_btn.config(state="normal", text="Start / Resume")
             self.pause_btn.config(state="disabled", text="Pause"); self.stop_btn.config(state="disabled")
             self.update_status(" · " + e[1]); self.log.insert("end", e[1]); self.log.see("end")
@@ -382,8 +429,8 @@ class App:
         return f"{sec // 60}m {sec % 60:02d}s" if sec >= 60 else f"{sec}s"
 
 
-def _init_worker(settings_dict):
-    from . import worker; worker.init(settings_dict)
+def _init_worker(settings_dict, progress_q=None):
+    from . import worker; worker.init(settings_dict, progress_q)
 
 
 def _work(path, src, out, prev=None, grey="keep"):

@@ -95,7 +95,7 @@ def _file_header(room, major, compat):
     return None
 
 
-def recover_video(path, dest):
+def recover_video(path, dest, progress=None):
     """Rebuild a video whose index survived. Writes dest; returns an info dict.
     Raises ValueError with a plain-language reason when it can't."""
     size = os.path.getsize(path)
@@ -132,6 +132,7 @@ def recover_video(path, dest):
                 chunk = fh.read(min(8 << 20, olen - pos))
                 if not chunk: break
                 w.write(chunk); pos += len(chunk)
+                if progress: progress("writing video", (pos - ENC_END) / max(1, olen - ENC_END))
             w.seek(mdat_at); w.write(mdat_hdr)          # mdat header sits right before the media
     damaged = sum(1 for o in offs if o < ENC_END)
     lost_s = duration * damaged / len(offs) if offs else 0.0
