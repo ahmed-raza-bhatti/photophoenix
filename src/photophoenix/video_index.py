@@ -24,6 +24,8 @@ MAX_ERROR_RATE = 0.02       # decode errors per test frame: at or below = "ok"
 REVIEW_ERROR_RATE = 0.10    # up to this, if clearly better than any other reference = "review"
 NAL_TYPES = (1, 5, 6, 7, 8, 9)
 SOLO_MAX = 1536 << 10      # largest frame accepted without a chain of NALs to confirm it
+# Windows: start ffmpeg without a console window (otherwise one flashes up per test decode)
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 # ---------------------------------------------------------------- reference library
@@ -402,7 +404,8 @@ def write_video(dest, mm, frames, ref, media_from, media_to, audio=None, afr=Non
 
 
 def decode_errors(path, ffmpeg):
-    r = subprocess.run([ffmpeg, "-v", "error", "-i", path, "-f", "null", "-"], capture_output=True, text=True)
+    r = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-i", path, "-f", "null", "-"], capture_output=True,
+                       text=True, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
     return len([l for l in r.stderr.splitlines() if l.strip()])
 
 
