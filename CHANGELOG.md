@@ -6,6 +6,10 @@ app redoes photos recovered by an older engine.
 
 ## [Unreleased]
 ### Added
+- Videos whose index was encrypted: the H.264 frames are found in the surviving data and a new
+  index is written using a healthy reference video's codec settings (picture only, no sound).
+  The reference is chosen by test-decoding with ffmpeg; "review" when a few frames may glitch.
+  Reference videos are learned with the camera library (`local/video_refs.json`).
 - Video recovery (MP4 / 3GP / MOV) for videos whose index survived at the end of the file: the
   file header is rebuilt in front of the untouched media; full length with sound, only the first
   moments are damaged (estimated in `report.csv`). Videos whose index was encrypted are reported

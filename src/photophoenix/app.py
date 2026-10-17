@@ -9,7 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-from . import __version__, config, copies, engine, safety, video
+from . import __version__, config, copies, engine, safety, video, video_index
 
 TITLE = "PhotoPhoenix"
 PHOTO_EXT = (".jpg.coot", ".jpeg.coot")
@@ -210,6 +210,11 @@ class App:
             os.makedirs(s.data_dir, exist_ok=True)
             with open(s.library_path, "w", encoding="utf-8") as fh: json.dump(entries, fh)
             ev(("detail", f"Camera library: {len(entries)} camera/size types"))
+        if videos and not os.path.exists(s.video_refs_path):
+            ev(("status", "Learning video settings from healthy videos (first run only)…"))
+            added, total = video_index.update_ref_library(s.video_refs_path, s.donor_roots(),
+                                                          [out.lower(), s.data_dir.lower()] + [d.lower() for d in s.skip_dirs])
+            ev(("detail", f"Reference videos: {total} video settings types"))
         state_path = os.path.join(out, "progress.json")
         try:
             state = json.load(open(state_path, encoding="utf-8"))

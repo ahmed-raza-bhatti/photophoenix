@@ -1,15 +1,17 @@
 """Worker-process side of the app. Never modifies the encrypted files."""
 import json, os, shutil
 
-from . import config, copies, engine, safety, video
+from . import config, copies, engine, safety, video, video_index
 
-_lib, _copies, _settings = None, {}, None
+_lib, _copies, _settings, _video_refs = None, {}, None, []
+_folder_ref, _folder_misses = {}, {}   # per folder: reference that worked / videos with no match
 
 
 def init(settings_dict):
     """Runs once in each worker process."""
-    global _lib, _copies, _settings
+    global _lib, _copies, _settings, _video_refs
     _settings = config.Settings(**settings_dict)
+    _video_refs = video_index.load_refs(_settings.video_refs_path)
     if _settings.low_priority:
         safety.low_priority(background=True)
     safety.use_temp_dir(_settings.temp_dir)
@@ -75,7 +77,23 @@ def _work_video(path, rel, out, prev, twin):
             shutil.copyfile(twin, dest)
             r = dict(status="ok", method="copy", frac=1.0, q=1.0, dims="", damaged_seconds=0)
         else:
-            r = video.recover_video(path, dest)
+            try:
+                r = video.recover_video(path, dest)
+            except ValueError as ex:
+                if "index was at the start" not in str(ex):
+                    raise
+                # index encrypted: rebuild it from the frames, using a reference video's settings.
+                # Remember per folder what worked (try it first) and stop trying everything in
+                # folders where earlier videos matched no reference.
+                folder = os.path.dirname(os.path.abspath(path)).lower()
+                try:
+                    r = video_index.rebuild(path, dest, _video_refs, temp_dir=_settings.temp_dir,
+                                            prefer=_folder_ref.get(folder),
+                                            max_tries=5 if _folder_misses.get(folder, 0) >= 2 else None)
+                    _folder_ref[folder] = r.pop("ref")
+                except ValueError:
+                    _folder_misses[folder] = _folder_misses.get(folder, 0) + 1
+                    raise
     except Exception as ex:
         if os.path.exists(dest) and not twin:
             try: os.remove(dest)  # don't leave a half-written video behind
@@ -84,7 +102,7 @@ def _work_video(path, rel, out, prev, twin):
     old = (prev or {}).get("output")
     if old and _inside(old, out) and os.path.normcase(old) != os.path.normcase(dest) and os.path.isfile(old):
         os.remove(old)
-    note = f"first ~{r['damaged_seconds']:g} s damaged" if r.get("damaged_seconds") else ""
+    note = r.get("note") or (f"first ~{r['damaged_seconds']:g} s damaged" if r.get("damaged_seconds") else "")
     return dict(file=rel, status=r["status"], method=r["method"], percent=round(r["frac"] * 100),
                 quality=r["q"], dims=r["dims"], output=dest, grey_note=note, kind="video",
                 ver=engine.ENGINE_VERSION)

@@ -7,7 +7,7 @@
 """
 import argparse, json, multiprocessing, os, sys
 
-from . import __version__, config, copies, engine, safety, video
+from . import __version__, config, copies, engine, safety, video, video_index
 
 
 def main(argv=None):
@@ -45,6 +45,9 @@ def main(argv=None):
         os.makedirs(s.data_dir, exist_ok=True)
         with open(s.library_path, "w", encoding="utf-8") as fh: json.dump(merged, fh)
         print(f"{added} new camera/size types learned; library now has {len(merged)} -> {s.library_path}")
+        vadded, vtotal = video_index.update_ref_library(s.video_refs_path, roots, [s.data_dir.lower()] + [d.lower() for d in s.skip_dirs],
+                                                        skip_names=engine.SYSTEM_DIR_NAMES)
+        print(f"{vadded} new reference video settings; {vtotal} in total -> {s.video_refs_path}")
     elif a.cmd == "find-copies":
         if not s.source_dir:
             sys.exit("Set source_dir (the folder with *.coot files) in config.toml or PHOTOPHOENIX_SOURCE_DIR.")
@@ -64,8 +67,15 @@ def main(argv=None):
         if twin:
             import shutil; shutil.copyfile(twin, out); print(f"ok: restored from an untouched copy -> {out}")
         else:
-            res = video.recover_video(a.file, out)
-            print(f"ok: video {res['dims']}, first ~{res['damaged_seconds']:g} s damaged -> {out}")
+            try:
+                res = video.recover_video(a.file, out)
+                print(f"ok: video {res['dims']}, first ~{res['damaged_seconds']:g} s damaged -> {out}")
+            except ValueError as ex:
+                if "index was at the start" not in str(ex):
+                    raise
+                res = video_index.rebuild(a.file, out, video_index.load_refs(s.video_refs_path), temp_dir=s.temp_dir)
+                print(f"{res['status']}: video {res['dims']}, {res['frames']} frames, {res['resolution']}, "
+                      f"{res['note']} (reference: {res['reference']}) -> {out}")
     elif a.cmd == "recover":
         if not os.path.exists(s.library_path):
             sys.exit(f"No camera library yet: run 'python -m photophoenix build-library DIR' first ({s.library_path}).")

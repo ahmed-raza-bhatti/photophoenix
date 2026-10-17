@@ -50,6 +50,10 @@ class Settings:
         return os.path.join(self.data_dir, "library.json")
 
     @property
+    def video_refs_path(self):
+        return os.path.join(self.data_dir, "video_refs.json")
+
+    @property
     def copies_path(self):
         return os.path.join(self.data_dir, "copies.csv")
 
